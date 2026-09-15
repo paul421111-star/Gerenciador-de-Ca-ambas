@@ -49,11 +49,28 @@ export interface Customer {
     active: number;
     createdAt: string;
 }
+export interface CustomerSite {
+    id: string;
+    customerId: string;
+    name: string;
+    address: string;
+    neighborhood: string;
+    city: string;
+    postalCode: string;
+    contact: string;
+    phone: string;
+    latitude: number | null;
+    longitude: number | null;
+    notes: string;
+    active: number;
+    createdAt: string;
+}
 export interface Rental {
     id: string;
     code: string;
     containerId: string;
     customerId: string;
+    siteId: string | null;
     address: string;
     neighborhood: string;
     city: string;
@@ -123,6 +140,16 @@ export interface RentalEvent {
     latitude: number | null;
     longitude: number | null;
 }
+export interface RentalSignature {
+    id: string;
+    rentalId: string;
+    kind: 'DELIVERY' | 'PICKUP';
+    role: 'RESPONSIBLE' | 'DRIVER';
+    signerName: string;
+    image: string;
+    signedAt: string;
+    actorId: string;
+}
 export interface Audit {
     id: string;
     actorId: string;
@@ -150,6 +177,8 @@ export interface Snapshot {
     trucks: Truck[];
     drivers: Driver[];
     customers: Customer[];
+    customerSites: CustomerSite[];
+    rentalSignatures: RentalSignature[];
     rentals: Rental[];
     jobs: Job[];
     events: RentalEvent[];
@@ -158,7 +187,7 @@ export interface Snapshot {
     users: User[];
     audit: Audit[];
 }
-export type CommandName = 'createRental' | 'importActiveRental' | 'transitionRental' | 'rescheduleJob' | 'createCustomer' | 'updateCustomer' | 'createDriver' | 'updateDriver' | 'createTruck' | 'updateTruck' | 'createContainer' | 'updateContainer' | 'confirmInventory' | 'addPayment' | 'voidPayment' | 'startMaintenance' | 'finishMaintenance' | 'createUser' | 'setUserActive' | 'changePassword' | 'saveSettings';
+export type CommandName = 'createRental' | 'importActiveRental' | 'transitionRental' | 'rescheduleJob' | 'createCustomer' | 'updateCustomer' | 'createCustomerSite' | 'updateCustomerSite' | 'importRentalGroups' | 'confirmPickup' | 'saveRentalSignatures' | 'createDriver' | 'updateDriver' | 'createTruck' | 'updateTruck' | 'createContainer' | 'updateContainer' | 'confirmInventory' | 'addPayment' | 'voidPayment' | 'startMaintenance' | 'finishMaintenance' | 'createUser' | 'setUserActive' | 'changePassword' | 'saveSettings';
 export interface Command {
     action: CommandName;
     payload: Record<string, unknown>;

@@ -32,6 +32,17 @@ export function openDatabase(path: string): DB {
         if (!columns.some(column => column.name === 'openEndedPickup'))
             db.exec('ALTER TABLE rentals ADD COLUMN openEndedPickup INTEGER NOT NULL DEFAULT 0');
         db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(3,?)').run(new Date().toISOString());
+        const rentalColumns = rows<{ name: string }>(db, 'PRAGMA table_info(rentals)');
+        if (!rentalColumns.some(column => column.name === 'siteId'))
+            db.exec('ALTER TABLE rentals ADD COLUMN siteId TEXT REFERENCES customerSites(id)');
+        db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(4,?)').run(new Date().toISOString());
+        db.exec(`CREATE TABLE IF NOT EXISTS rentalSignatures (
+ id TEXT PRIMARY KEY, rentalId TEXT NOT NULL REFERENCES rentals(id), kind TEXT NOT NULL CHECK(kind IN ('DELIVERY','PICKUP')),
+ role TEXT NOT NULL CHECK(role IN ('RESPONSIBLE','DRIVER')), signerName TEXT NOT NULL, image TEXT NOT NULL, signedAt TEXT NOT NULL,
+ actorId TEXT NOT NULL REFERENCES users(id), UNIQUE(rentalId, kind, role)
+)`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_rental_signatures ON rentalSignatures(rentalId, kind)');
+        db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(5,?)').run(new Date().toISOString());
     });
     if (path !== ':memory:') {
         try {

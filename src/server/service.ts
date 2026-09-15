@@ -4,9 +4,11 @@ import { assert, AppError } from "./errors.ts";
 import * as v from "./validate.ts";
 import { createAccount, hashPassword, verifyPassword, USER_COLUMNS, sha256 } from "./auth.ts";
 import { dateKey, dateTime } from "../shared/format.ts";
-import type { CommandResult, Container, Customer, Driver, Truck, User, Rental, Job, Payment, Maintenance, RentalEvent, Audit, Snapshot, Settings } from "../shared/types.ts";
+import { rentalGroupCatalog } from "../shared/rental-groups.ts";
+import { isSignatureImage } from "../shared/signature.ts";
+import type { CommandResult, Container, Customer, CustomerSite, Driver, Truck, User, Rental, Job, Payment, Maintenance, RentalEvent, Audit, Snapshot, Settings, RentalSignature } from "../shared/types.ts";
 const OPEN = "('RESERVED','DELIVERING','ACTIVE','COLLECTING','RETURNING')";
-const TABLES = ["containers", "customers", "drivers", "trucks", "rentals", "jobs", "payments", "maintenance", "users"] as const;
+const TABLES = ["containers", "customers", "customerSites", "drivers", "trucks", "rentals", "jobs", "payments", "maintenance", "users"] as const;
 function find<T>(db: DB, table: typeof TABLES[number], id: string): T {
     const found = row<T>(db, `SELECT * FROM ${table} WHERE id=?`, id);
     assert(found, "Registro não encontrado.", 404);
@@ -54,6 +56,15 @@ export function checkSlot(db: DB, driverId: string, truckId: string, start: stri
     const conflict = candidates.find(j => Date.parse(start) < Date.parse(j.scheduledAt) + j.durationMinutes * 60000 && end > Date.parse(j.scheduledAt));
     assert(!conflict, `Conflito de agenda: motorista ou caminhão já possui serviço em ${conflict ? dateTime(conflict.scheduledAt) : "este horário"}. Reserve um intervalo sem sobreposição.`, 409);
 }
+function optionalSite(db: DB, p: Record<string, unknown>, customerId: string): string | null {
+    const siteId = v.str(p, "siteId", 0);
+    if (!siteId)
+        return null;
+    const site = find<CustomerSite>(db, "customerSites", siteId);
+    assert(site.customerId === customerId, "Este grupo não pertence ao cliente selecionado.");
+    assert(site.active === 1, "Este grupo está inativo.");
+    return site.id;
+}
 function schedule(db: DB, rentalId: string, kind: Job['kind'], driverId: string, truckId: string, at: string, duration: number) {
     checkResource(db, driverId, truckId, at);
     checkSlot(db, driverId, truckId, at, duration);
@@ -73,14 +84,15 @@ function createRental(db: DB, u: User, p: Record<string, unknown>, now: string):
         n: number;
     }>(db, "SELECT COUNT(*) n FROM rentals")!.n + 1;
     const code = `LOC-${String(count).padStart(5, "0")}`;
-    const g = v.coordinates(p), bill = billing(p);
-    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), v.str(p, "notes", 0, 2000), deliveryAt, pickup.pickupAt, bill.priceCents, bill.byMeasurement, pickup.openEndedPickup, u.id, now];
-    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,priceCents,byMeasurement,openEndedPickup,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED')").run(...values);
+    const g = v.coordinates(p), bill = billing(p), siteId = optionalSite(db, p, customerId);
+    const values = [id, code, containerId, customerId, siteId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), v.str(p, "notes", 0, 2000), deliveryAt, pickup.pickupAt, bill.priceCents, bill.byMeasurement, pickup.openEndedPickup, u.id, now];
+    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,siteId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,priceCents,byMeasurement,openEndedPickup,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED')").run(...values);
     schedule(db, id, "DELIVERY", v.str(p, "deliveryDriverId", 1), v.str(p, "deliveryTruckId", 1), deliveryAt, duration);
     if (!pickup.openEndedPickup)
         schedule(db, id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), pickup.pickupAt, duration);
     db.prepare("UPDATE containers SET status='RESERVED' WHERE id=?").run(containerId);
-    event(db, u, id, "created", `Reserva ${code} criada. Caçamba ${container.code} separada para este cliente.${bill.byMeasurement ? ' Cobrança por medição, sem valor fechado.' : ''}${pickup.openEndedPickup ? ' Retirada sem data certa, combinada depois.' : ''}`, now);
+    const site = siteId ? find<CustomerSite>(db, "customerSites", siteId) : null;
+    event(db, u, id, "created", `Reserva ${code} criada. Caçamba ${container.code} separada para este cliente.${site ? ` Local: ${site.name}.` : ''}${bill.byMeasurement ? ' Cobrança por medição, sem valor fechado.' : ''}${pickup.openEndedPickup ? ' Retirada sem data certa, combinada depois.' : ''}`, now);
     return { id, message: `Locação ${code} agendada com entrega e retirada.` };
 }
 function importActiveRental(db: DB, u: User, p: Record<string, unknown>, now: string): CommandResult {
@@ -99,10 +111,10 @@ function importActiveRental(db: DB, u: User, p: Record<string, unknown>, now: st
     find<Truck>(db, "trucks", deliveryTruck);
     const code = `LOC-${String(row<{
         n: number;
-    }>(db, "SELECT COUNT(*) n FROM rentals")!.n + 1).padStart(5, "0")}`, g = v.coordinates(p), bill = billing(p);
+    }>(db, "SELECT COUNT(*) n FROM rentals")!.n + 1).padStart(5, "0")}`, g = v.coordinates(p), bill = billing(p), siteId = optionalSite(db, p, customerId);
     const notes = `ABERTURA DE OPERAÇÃO: entrega passada declarada pelo administrador, não executada pelo aplicativo. A previsão de entrega utiliza a data declarada como referência. ${v.str(p, "notes", 0, 1800)}`;
-    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), notes, deliveryAt, pickup.pickupAt, deliveryAt, bill.priceCents, bill.byMeasurement, pickup.openEndedPickup, u.id, now];
-    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,deliveredAt,priceCents,byMeasurement,openEndedPickup,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE')").run(...values);
+    const values = [id, code, containerId, customerId, siteId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), notes, deliveryAt, pickup.pickupAt, deliveryAt, bill.priceCents, bill.byMeasurement, pickup.openEndedPickup, u.id, now];
+    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,siteId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,deliveredAt,priceCents,byMeasurement,openEndedPickup,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE')").run(...values);
     db.prepare("INSERT INTO jobs(id,rentalId,kind,driverId,truckId,scheduledAt,durationMinutes,status,completedAt) VALUES(?,?,'DELIVERY',?,?,?,?,'DONE',?)").run(randomUUID(), id, deliveryDriver, deliveryTruck, deliveryAt, duration, deliveryAt);
     if (!pickup.openEndedPickup)
         schedule(db, id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), pickup.pickupAt, duration);
@@ -194,6 +206,59 @@ function transitionRental(db: DB, u: User, p: Record<string, unknown>, now: stri
     event(db, u, r.id, action, `${label}. ${notes}`, now, gps);
     return { id: r.id, message: label + "." };
 }
+function confirmPickup(db: DB, u: User, p: Record<string, unknown>, now: string): CommandResult {
+    let r = find<Rental>(db, "rentals", v.str(p, "id", 1));
+    checkVersion(r, p);
+    assert(!r.pickedUpAt, "Esta caçamba já foi retirada.", 409);
+    assert(["ACTIVE", "COLLECTING"].includes(r.status), "A retirada só pode ser registrada com a caçamba no cliente.", 409);
+    let job = row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind='PICKUP'", r.id);
+    if (!job) {
+        const delivery = row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind='DELIVERY'", r.id);
+        const driverId = v.str(p, "pickupDriverId", 0) || delivery?.driverId || "";
+        const truckId = v.str(p, "pickupTruckId", 0) || delivery?.truckId || "";
+        assert(driverId && truckId, "Programe a retirada antes de registrar a coleta.", 409);
+        const duration = v.integer(p, "durationMinutes", 15, 480, settings(db).jobDurationMinutes);
+        schedule(db, r.id, "PICKUP", driverId, truckId, now, duration);
+        db.prepare("UPDATE rentals SET pickupAt=?,version=version+1 WHERE id=?").run(now, r.id);
+        r = find<Rental>(db, "rentals", r.id);
+        job = row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind='PICKUP'", r.id);
+    }
+    assert(job, "Programe a retirada antes de registrar a coleta.", 409);
+    assert(u.role !== "DRIVER" || job.driverId === u.driverId, "Este serviço está atribuído a outro motorista.", 403);
+    if (job.status === "SCHEDULED") {
+        checkResource(db, job.driverId, job.truckId, now);
+        assert(!row(db, "SELECT id FROM jobs WHERE id!=? AND status IN ('IN_PROGRESS','RETURNING') AND (driverId=? OR truckId=?)", job.id, job.driverId, job.truckId), "Caminhão ou motorista ainda possui uma operação em andamento. Finalize o retorno anterior.", 409);
+        db.prepare("UPDATE jobs SET status='IN_PROGRESS',startedAt=?,version=version+1 WHERE id=?").run(now, job.id);
+        db.prepare("UPDATE rentals SET status='COLLECTING',version=version+1 WHERE id=?").run(r.id);
+        job = row<Job>(db, "SELECT * FROM jobs WHERE id=?", job.id)!;
+    }
+    assert(job.status === "IN_PROGRESS", "A retirada ainda não foi iniciada.", 409);
+    db.prepare("UPDATE jobs SET status='RETURNING',version=version+1 WHERE id=?").run(job.id);
+    db.prepare("UPDATE rentals SET status='RETURNING',pickedUpAt=?,version=version+1 WHERE id=?").run(now, r.id);
+    db.prepare("UPDATE containers SET status='RETURNING' WHERE id=?").run(r.containerId);
+    event(db, u, r.id, "complete_pickup", `Coleta confirmada na lista de locações. Retirada em ${dateTime(now)}. Retorno ao pátio pendente.`, now);
+    return { id: r.id, message: `Retirada registrada em ${dateTime(now)}.` };
+}
+function saveRentalSignatures(db: DB, u: User, p: Record<string, unknown>, now: string): CommandResult {
+    const r = find<Rental>(db, "rentals", v.str(p, "rentalId", 1));
+    assert(r.status !== "CANCELLED", "Locação cancelada não pode receber assinatura.", 409);
+    const kind = v.choice(p, "kind", ["DELIVERY", "PICKUP"] as const);
+    const job = row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind=?", r.id, kind)
+        ?? row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind='DELIVERY'", r.id);
+    assert(u.role !== "DRIVER" || Boolean(job && job.driverId === u.driverId), "Este serviço está atribuído a outro motorista.", 403);
+    const existing = rows(db, "SELECT id FROM rentalSignatures WHERE rentalId=? AND kind=?", r.id, kind);
+    assert(!existing.length || u.role !== "DRIVER", "As assinaturas desta etapa já foram registradas.", 409);
+    const responsibleName = v.str(p, "responsibleName", 2, 120), driverName = v.str(p, "driverName", 2, 120);
+    const responsibleImage = v.str(p, "responsibleImage", 80, 60000), driverImage = v.str(p, "driverImage", 80, 60000);
+    assert(isSignatureImage(responsibleImage) && isSignatureImage(driverImage), "A assinatura precisa ser um desenho PNG válido.");
+    db.prepare("DELETE FROM rentalSignatures WHERE rentalId=? AND kind=?").run(r.id, kind);
+    const insert = db.prepare("INSERT INTO rentalSignatures(id,rentalId,kind,role,signerName,image,signedAt,actorId) VALUES(?,?,?,?,?,?,?,?)");
+    insert.run(randomUUID(), r.id, kind, "RESPONSIBLE", responsibleName, responsibleImage, now, u.id);
+    insert.run(randomUUID(), r.id, kind, "DRIVER", driverName, driverImage, now, u.id);
+    const label = kind === "DELIVERY" ? "entrega" : "retirada / troca";
+    event(db, u, r.id, kind === "DELIVERY" ? "sign_delivery" : "sign_pickup", `Assinaturas digitais da ${label} registradas: ${responsibleName} e ${driverName}.`, now);
+    return { id: r.id, message: `Assinaturas da ${label} salvas no sistema.` };
+}
 function reschedule(db: DB, u: User, p: Record<string, unknown>, now: string): CommandResult {
     const j = find<Job>(db, "jobs", v.str(p, "id", 1));
     checkVersion(j, p);
@@ -233,6 +298,35 @@ function saveCustomer(db: DB, p: Record<string, unknown>, update: boolean, now: 
     else
         db.prepare("INSERT INTO customers(name,contact,phone,email,document,address,notes,active,id,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?)").run(...values, id, now);
     return { id, message: "Cliente salvo." };
+}
+function saveCustomerSite(db: DB, p: Record<string, unknown>, update: boolean, now: string): CommandResult {
+    const id = update ? v.str(p, "id", 1) : randomUUID();
+    const existing = update ? find<CustomerSite>(db, "customerSites", id) : null;
+    const customerId = existing?.customerId ?? v.str(p, "customerId", 1);
+    find<Customer>(db, "customers", customerId);
+    const name = v.str(p, "name", 2, 80);
+    assert(!row(db, "SELECT id FROM customerSites WHERE customerId=? AND name=? COLLATE NOCASE AND id!=?", customerId, name, id), "Já existe um grupo com este nome neste cliente.", 409);
+    const g = v.coordinates(p), active = v.integer(p, "active", 0, 1, 1);
+    const values = [name, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "contact", 0, 120), v.phone(p, "phone", false), g.latitude, g.longitude, v.str(p, "notes", 0, 1000), active];
+    if (update)
+        db.prepare("UPDATE customerSites SET name=?,address=?,neighborhood=?,city=?,postalCode=?,contact=?,phone=?,latitude=?,longitude=?,notes=?,active=? WHERE id=?").run(...values, id);
+    else
+        db.prepare("INSERT INTO customerSites(name,address,neighborhood,city,postalCode,contact,phone,latitude,longitude,notes,active,id,customerId,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(...values, id, customerId, now);
+    return { id, message: "Grupo de locação salvo." };
+}
+function importRentalGroups(db: DB, p: Record<string, unknown>, now: string): CommandResult {
+    const customerId = v.str(p, "customerId", 1);
+    const customer = find<Customer>(db, "customers", customerId);
+    const catalog = rentalGroupCatalog(customer.document);
+    assert(catalog.length > 0, "Este cliente não tem grupos oficiais publicados. Cadastre os locais um a um.", 404);
+    let created = 0;
+    for (const site of catalog) {
+        if (row(db, "SELECT id FROM customerSites WHERE customerId=? AND name=? COLLATE NOCASE", customerId, site.name))
+            continue;
+        saveCustomerSite(db, { customerId, name: site.name, address: site.address, neighborhood: site.neighborhood, city: site.city, postalCode: site.postalCode, contact: customer.contact, phone: customer.phone, notes: site.notes, active: 1 }, false, now);
+        created++;
+    }
+    return { id: customerId, message: created ? `${created} grupo(s) de locação cadastrado(s) a partir do endereço oficial da cooperativa.` : "Os grupos oficiais deste cliente já estavam cadastrados." };
 }
 function saveDriver(db: DB, p: Record<string, unknown>, update: boolean, now: string): CommandResult {
     const id = update ? v.str(p, "id", 1) : randomUUID();
@@ -293,14 +387,19 @@ function dispatch(db: DB, u: User, action: string, p: Record<string, unknown>, n
     if (admin.includes(action))
         assert(u.role === "ADMIN", "Acesso exclusivo do administrador.", 403);
     if (u.role === "DRIVER")
-        assert(["transitionRental", "changePassword"].includes(action), "O perfil motorista não pode executar esta ação.", 403);
+        assert(["transitionRental", "confirmPickup", "saveRentalSignatures", "changePassword"].includes(action), "O perfil motorista não pode executar esta ação.", 403);
     switch (action) {
         case "createRental": return createRental(db, u, p, now);
         case "importActiveRental": return importActiveRental(db, u, p, now);
         case "transitionRental": return transitionRental(db, u, p, now);
+        case "confirmPickup": return confirmPickup(db, u, p, now);
+        case "saveRentalSignatures": return saveRentalSignatures(db, u, p, now);
         case "rescheduleJob": return reschedule(db, u, p, now);
         case "createCustomer":
         case "updateCustomer": return saveCustomer(db, p, action === "updateCustomer", now);
+        case "createCustomerSite":
+        case "updateCustomerSite": return saveCustomerSite(db, p, action === "updateCustomerSite", now);
+        case "importRentalGroups": return importRentalGroups(db, p, now);
         case "createDriver":
         case "updateDriver": return saveDriver(db, p, action === "updateDriver", now);
         case "createTruck":
@@ -431,13 +530,19 @@ export function snapshot(db: DB, actor: User): Snapshot {
         // Related job metadata is needed for a full history; commands still check each assigned driver.
         const allRentals = driver ? rows<Rental>(db, "SELECT r.* FROM rentals r WHERE EXISTS(SELECT 1 FROM jobs j WHERE j.rentalId=r.id AND j.driverId=?) ORDER BY r.createdAt DESC", u.driverId!) : rows<Rental>(db, "SELECT * FROM rentals ORDER BY createdAt DESC");
         const rentals = allRentals.map(r => driver ? { ...r, priceCents: 0 } : r);
+        const rentalIds = rentals.map(r => r.id);
         const containerIds = new Set(rentals.map(r => r.containerId)), customerIds = new Set(rentals.map(r => r.customerId)), truckIds = new Set(jobs.map(j => j.truckId));
+        const rentalSignatures = rentalIds.length
+            ? rows<RentalSignature>(db, `SELECT * FROM rentalSignatures WHERE rentalId IN (${rentalIds.map(() => "?").join(",")}) ORDER BY signedAt`, ...rentalIds)
+            : [];
         return {
             user: u, settings: driver ? { ...settings(db), defaultPriceCents: 0 } : settings(db), serverTime: new Date().toISOString(),
             containers: rows<Container>(db, "SELECT * FROM containers ORDER BY code").filter(c => !driver || containerIds.has(c.id)),
             trucks: rows<Truck>(db, "SELECT * FROM trucks ORDER BY code").filter(t => !driver || truckIds.has(t.id)),
             drivers: rows<Driver>(db, "SELECT * FROM drivers ORDER BY name").filter(d => !driver || d.id === u.driverId),
             customers: rows<Customer>(db, "SELECT * FROM customers ORDER BY name").filter(c => !driver || customerIds.has(c.id)).map(c => driver ? { ...c, document: null, email: "", address: "", notes: "" } : c),
+            customerSites: driver ? [] : rows<CustomerSite>(db, "SELECT * FROM customerSites ORDER BY name"),
+            rentalSignatures,
             rentals, jobs,
             events: rows<RentalEvent>(db, "SELECT e.*,u.name actorName FROM rentalEvents e JOIN users u ON u.id=e.actorId ORDER BY occurredAt DESC").filter(e => (!driver || allowed.has(e.rentalId)) && (!driver || !e.action.startsWith("payment"))),
             payments: driver ? [] : rows<Payment>(db, "SELECT * FROM payments ORDER BY paidAt DESC"),

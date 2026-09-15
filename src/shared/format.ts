@@ -14,6 +14,24 @@ export function balanceLabel(rental: { byMeasurement?: number; priceCents: numbe
 export function isOpenEndedPickup(rental: { openEndedPickup?: number }): boolean {
     return rental.openEndedPickup === 1;
 }
+export function sortSites<T extends { name: string }>(sites: T[]): T[] {
+    return [...sites].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true }));
+}
+export function customerPlaceLabel(customer?: { name: string }, site?: { name: string } | null): string {
+    if (!customer)
+        return site?.name ?? '';
+    return site?.name ? `${customer.name} · ${site.name}` : customer.name;
+}
+export function groupSitesByCity<T extends { city: string; name: string }>(sites: T[]): [string, T[]][] {
+    const map = new Map<string, T[]>();
+    for (const site of sortSites(sites)) {
+        const city = site.city.trim() || 'Sem cidade';
+        const list = map.get(city) ?? [];
+        list.push(site);
+        map.set(city, list);
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'));
+}
 export function toLocalInput(value: string | Date): string {
     const d = new Date(value);
     if (!Number.isFinite(d.getTime()))

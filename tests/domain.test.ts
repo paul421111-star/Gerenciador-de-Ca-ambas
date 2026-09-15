@@ -12,6 +12,7 @@ import { hashPassword, verifyPassword, authenticate, sessionUser, sha256 } from 
 import { AppError } from '../src/server/errors.ts';
 import { fromLocalInput, toLocalInput, dateKey, csvCell } from '../src/shared/format.ts';
 import type { User, Rental, Job, Container, CommandName } from '../src/shared/types.ts';
+import { SAMPLE_SIGNATURE_PNG } from '../src/shared/signature.ts';
 const NOW = '2026-09-15T10:00:00.000Z', DELIVERY = '2026-09-16T11:00:00.000Z', PICKUP = '2026-09-23T11:00:00.000Z';
 const PASSWORD = 'Private-test-password-456!';
 const HASH = hashPassword(PASSWORD);
@@ -246,6 +247,8 @@ test('snapshot redacts finance, documents, other clients and administrative user
     assert.equal(s.customers.length, 1);
     assert.equal(s.customers[0].document, null);
     assert.equal(s.payments.length, 0);
+    assert.equal(s.customerSites.length, 0);
+    assert.equal(s.rentalSignatures.length, 0);
     assert.equal(s.users.length, 0);
     assert.equal(s.audit.length, 0);
     assert.equal(s.events.some(e => e.action.startsWith('payment')), false);
@@ -265,6 +268,77 @@ test('rescheduling preserves old and new assignments in history and never change
     assert.match(ev.description, /Driver 1/);
     assert.match(ev.description, /Driver 2/);
     rejects(() => f.run('rescheduleJob', { id: j.id, version: j.version, scheduledAt: '2026-09-18T11:00:00Z', driverId: 'd2', truckId: 't2', durationMinutes: 60, reason: 'Another reschedule' }), 409);
+}
+finally {
+    f.close();
+} });
+test('customer groups keep one contractor with distinct delivery places', () => { const f = fixture(); try {
+    const eleven = f.run('createCustomerSite', { customerId: 'c1', name: 'Grupo 11', address: 'Rua Alfa, 11', neighborhood: 'Jardim A', city: 'Taboão da Serra / SP', postalCode: '06764-000', contact: 'Obra 11', phone: '11988887777' }).id!;
+    const nineteen = f.run('createCustomerSite', { customerId: 'c1', name: 'Grupo 19', address: 'Rua Beta, 19', neighborhood: 'Jardim B', city: 'Embu das Artes / SP', postalCode: '06803-000', contact: 'Obra 19', phone: '11988886666' }).id!;
+    rejects(() => f.run('createCustomerSite', { customerId: 'c1', name: 'grupo 11', address: 'Rua Gama, 1', neighborhood: 'Centro', city: 'Taboão da Serra / SP' }), 409);
+    const id = f.create({ siteId: eleven, address: 'Rua Alfa, 11', neighborhood: 'Jardim A', city: 'Taboão da Serra / SP' });
+    assert.equal(f.rental(id).siteId, eleven);
+    rejects(() => f.create({ containerId: 'b2', siteId: nineteen, customerId: 'c2' }));
+    const snap = snapshot(f.db, f.user());
+    assert.equal(snap.customerSites.length, 2);
+    assert.equal(snap.customerSites[0].name, 'Grupo 11');
+}
+finally {
+    f.close();
+} });
+test('CHVN rental groups stay on one CNPJ with three dumpster addresses besides HQ', () => { const f = fixture(); try {
+    rejects(() => f.run('importRentalGroups', { customerId: 'c1' }), 404);
+    f.db.prepare("UPDATE customers SET document='02199067000122' WHERE id='c1'").run();
+    const first = f.run('importRentalGroups', { customerId: 'c1' });
+    assert.match(first.message, /10 grupo/);
+    const again = f.run('importRentalGroups', { customerId: 'c1' });
+    assert.match(again.message, /já estavam cadastrados/);
+    const snap = snapshot(f.db, f.user());
+    assert.equal(snap.customerSites.length, 10);
+    assert.equal(new Set(snap.customerSites.map(site => site.address)).size, 4);
+    assert.equal(snap.customerSites.filter(site => site.address.includes('São Judas')).length, 7);
+    const firenze = snap.customerSites.find(site => site.name.startsWith('Grupo 16'))!;
+    const id = f.create({ siteId: firenze.id, address: firenze.address, neighborhood: firenze.neighborhood, city: firenze.city });
+    assert.equal(f.rental(id).siteId, firenze.id);
+}
+finally {
+    f.close();
+} });
+test('confirming pickup from the list records the real time and starts the return', () => { const f = fixture(); try {
+    const id = f.create();
+    rejects(() => f.run('confirmPickup', { id, version: f.rental(id).version }), 409);
+    active(f, id);
+    rejects(() => f.run('confirmPickup', { id, version: f.rental(id).version }, 'user2', '2026-09-18T14:00:00.000Z'), 403);
+    f.run('confirmPickup', { id, version: f.rental(id).version }, 'admin', '2026-09-18T14:00:00.000Z');
+    assert.equal(f.rental(id).status, 'RETURNING');
+    assert.equal(f.rental(id).pickedUpAt, '2026-09-18T14:00:00.000Z');
+    rejects(() => f.run('confirmPickup', { id, version: f.rental(id).version }, 'admin', '2026-09-18T15:00:00.000Z'), 409);
+    const open = f.create({ containerId: 'b2', openEndedPickup: true, deliveryDriverId: 'd2', pickupDriverId: 'd2', deliveryTruckId: 't2', pickupTruckId: 't2' });
+    f.transition(open, 'start_delivery', DELIVERY);
+    f.transition(open, 'complete_delivery', '2026-09-16T11:15:00.000Z');
+    f.run('confirmPickup', { id: open, version: f.rental(open).version }, 'admin', '2026-09-18T15:00:00.000Z');
+    assert.equal(f.rental(open).pickedUpAt, '2026-09-18T15:00:00.000Z');
+    assert.equal(f.job(open, 'PICKUP').status, 'RETURNING');
+}
+finally {
+    f.close();
+} });
+test('virtual signatures persist on the rental and stay visible to the assigned driver', () => { const f = fixture(); try {
+    const id = f.create();
+    const payload = { rentalId: id, kind: 'DELIVERY', responsibleName: 'Responsável da obra', driverName: 'Driver 1', responsibleImage: SAMPLE_SIGNATURE_PNG, driverImage: SAMPLE_SIGNATURE_PNG };
+    rejects(() => f.run('saveRentalSignatures', { ...payload, responsibleImage: 'data:image/png;base64,xxxx' }));
+    rejects(() => f.run('saveRentalSignatures', payload, 'user2'), 403);
+    f.run('saveRentalSignatures', payload, 'user1');
+    const driverSnap = snapshot(f.db, f.user('user1'));
+    assert.equal(driverSnap.rentalSignatures.length, 2);
+    assert.equal(driverSnap.rentalSignatures[0].signerName, 'Responsável da obra');
+    rejects(() => f.run('saveRentalSignatures', payload, 'user1'), 409);
+    f.run('saveRentalSignatures', { ...payload, responsibleName: 'Outro responsável' }, 'admin');
+    assert.equal(snapshot(f.db, f.user()).rentalSignatures.find(item => item.role === 'RESPONSIBLE')?.signerName, 'Outro responsável');
+    f.run('saveRentalSignatures', { ...payload, kind: 'PICKUP', driverName: 'Motorista da retirada' }, 'admin');
+    assert.equal(snapshot(f.db, f.user()).rentalSignatures.length, 4);
+    f.transition(id, 'cancel');
+    rejects(() => f.run('saveRentalSignatures', { ...payload, rentalId: id, kind: 'DELIVERY' }, 'admin'), 409);
 }
 finally {
     f.close();
