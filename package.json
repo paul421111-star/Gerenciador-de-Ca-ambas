@@ -15,7 +15,7 @@
     "backup": "node --experimental-strip-types scripts/backup.mjs",
     "admin:reset": "node --experimental-strip-types scripts/reset-password.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/domain.test.ts tests/security.test.ts tests/api.test.ts tests/cep.test.ts",
+    "test": "node --experimental-strip-types --test tests/domain.test.ts tests/security.test.ts tests/api.test.ts tests/cep.test.ts tests/geo.test.ts",
     "test:e2e": "playwright test",
     "check": "npm run typecheck && npm test && npm run build",
     "test:syntax": "node scripts/check-syntax.mjs",

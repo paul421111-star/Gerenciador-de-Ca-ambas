@@ -15,6 +15,10 @@ function find<T>(db: DB, table: typeof TABLES[number], id: string): T {
 function audit(db: DB, user: User, action: string, id: string, detail: string, now: string) {
     db.prepare("INSERT INTO audit(id,actorId,action,entityId,detail,createdAt) VALUES(?,?,?,?,?,?)").run(randomUUID(), user.id, action, id, detail, now);
 }
+function billing(p: Record<string, unknown>): { byMeasurement: number; priceCents: number } {
+    const byMeasurement = p.byMeasurement === true || p.byMeasurement === 1;
+    return byMeasurement ? { byMeasurement: 1, priceCents: 0 } : { byMeasurement: 0, priceCents: v.integer(p, "priceCents", 0, 100000000) };
+}
 function event(db: DB, user: User, rentalId: string, action: string, description: string, now: string, gps = { latitude: null as number | null, longitude: null as number | null }) {
     db.prepare("INSERT INTO rentalEvents(id,rentalId,action,description,actorId,occurredAt,latitude,longitude) VALUES(?,?,?,?,?,?,?,?)").run(randomUUID(), rentalId, action, description, user.id, now, gps.latitude, gps.longitude);
 }
@@ -59,13 +63,13 @@ function createRental(db: DB, u: User, p: Record<string, unknown>, now: string):
         n: number;
     }>(db, "SELECT COUNT(*) n FROM rentals")!.n + 1;
     const code = `LOC-${String(count).padStart(5, "0")}`;
-    const g = v.coordinates(p);
-    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), v.str(p, "notes", 0, 2000), deliveryAt, pickupAt, v.integer(p, "priceCents", 0, 100000000), u.id, now];
-    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,priceCents,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED')").run(...values);
+    const g = v.coordinates(p), bill = billing(p);
+    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), v.str(p, "notes", 0, 2000), deliveryAt, pickupAt, bill.priceCents, bill.byMeasurement, u.id, now];
+    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,priceCents,byMeasurement,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED')").run(...values);
     schedule(db, id, "DELIVERY", v.str(p, "deliveryDriverId", 1), v.str(p, "deliveryTruckId", 1), deliveryAt, duration);
     schedule(db, id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), pickupAt, duration);
     db.prepare("UPDATE containers SET status='RESERVED' WHERE id=?").run(containerId);
-    event(db, u, id, "created", `Reserva ${code} criada. Caçamba ${container.code} separada para este cliente.`, now);
+    event(db, u, id, "created", `Reserva ${code} criada. Caçamba ${container.code} separada para este cliente.${bill.byMeasurement ? ' Cobrança por medição, sem valor fechado.' : ''}`, now);
     return { id, message: `Locação ${code} agendada com entrega e retirada.` };
 }
 function importActiveRental(db: DB, u: User, p: Record<string, unknown>, now: string): CommandResult {
@@ -82,10 +86,10 @@ function importActiveRental(db: DB, u: User, p: Record<string, unknown>, now: st
     find<Truck>(db, "trucks", deliveryTruck);
     const code = `LOC-${String(row<{
         n: number;
-    }>(db, "SELECT COUNT(*) n FROM rentals")!.n + 1).padStart(5, "0")}`, g = v.coordinates(p);
+    }>(db, "SELECT COUNT(*) n FROM rentals")!.n + 1).padStart(5, "0")}`, g = v.coordinates(p), bill = billing(p);
     const notes = `ABERTURA DE OPERAÇÃO: entrega passada declarada pelo administrador, não executada pelo aplicativo. A previsão de entrega utiliza a data declarada como referência. ${v.str(p, "notes", 0, 1800)}`;
-    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), notes, deliveryAt, pickupAt, deliveryAt, v.integer(p, "priceCents", 0, 100000000), u.id, now];
-    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,deliveredAt,priceCents,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE')").run(...values);
+    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), notes, deliveryAt, pickupAt, deliveryAt, bill.priceCents, bill.byMeasurement, u.id, now];
+    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,deliveredAt,priceCents,byMeasurement,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE')").run(...values);
     db.prepare("INSERT INTO jobs(id,rentalId,kind,driverId,truckId,scheduledAt,durationMinutes,status,completedAt) VALUES(?,?,'DELIVERY',?,?,?,?,'DONE',?)").run(randomUUID(), id, deliveryDriver, deliveryTruck, deliveryAt, duration, deliveryAt);
     schedule(db, id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), pickupAt, duration);
     db.prepare("UPDATE containers SET capacityM3=?,status='ON_SITE' WHERE id=?").run(capacity, containerId);
@@ -298,7 +302,8 @@ function dispatch(db: DB, u: User, action: string, p: Record<string, unknown>, n
             assert(r.status !== "CANCELLED", "Locação cancelada não pode receber pagamento.");
             const amount = v.integer(p, "amountCents", 1, 100000000), at = v.iso(p, "paidAt");
             assert(at <= now, "O recebimento não pode ter data futura.");
-            assert(paid(db, r.id) + amount <= r.priceCents, "O valor supera o saldo da locação.", 409);
+            if (!r.byMeasurement)
+                assert(paid(db, r.id) + amount <= r.priceCents, "O valor supera o saldo da locação.", 409);
             const id = randomUUID();
             db.prepare("INSERT INTO payments(id,rentalId,amountCents,method,paidAt,note,createdBy) VALUES(?,?,?,?,?,?,?)").run(id, r.id, amount, v.choice(p, "method", ["PIX", "CASH", "TRANSFER", "CARD"] as const), at, v.str(p, "note", 0, 500), u.id);
             event(db, u, r.id, "payment", "Recebimento manual registrado pela operação.", now);

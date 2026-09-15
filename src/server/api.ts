@@ -5,6 +5,7 @@ import { assert, AppError } from './errors.ts';
 import { object, secret, email } from './validate.ts';
 import { cookieToken, sessionCookie, sameOrigin, readJson, json, errorResponse } from './http.ts';
 import { lookupCep } from './cep.ts';
+import { geocodePayload, lookupGeocode } from './geocode.ts';
 /** Shared Web API handler: exercised directly by tests and exposed through Next Route Handlers. */
 export async function handleApi(request: Request, providedDB?: DB): Promise<Response> {
     try {
@@ -38,8 +39,14 @@ export async function handleApi(request: Request, providedDB?: DB): Promise<Resp
             const cep = path.startsWith('/api/cep/') ? path.slice('/api/cep/'.length) : url.searchParams.get('cep') ?? '';
             return json(await lookupCep(cep));
         }
+        if (request.method === 'GET' && path === '/api/geocode') {
+            const query = url.searchParams.get('q') ?? url.searchParams.get('address') ?? '';
+            return json(await lookupGeocode(query, { city: url.searchParams.get('city') ?? '' }));
+        }
         if (path === '/api/command' && request.method === 'POST') {
-            const body = await readJson(request);
+            const body = await readJson(request) as { action?: string; payload?: Record<string, unknown> };
+            if ((body.action === 'createRental' || body.action === 'importActiveRental') && body.payload)
+                body.payload = await geocodePayload(body.payload);
             const result = execute(db, user, body, request.headers.get('idempotency-key') ?? '');
             return json(result);
         }

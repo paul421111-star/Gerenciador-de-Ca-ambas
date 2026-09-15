@@ -1,5 +1,16 @@
 export const TIMEZONE = 'America/Sao_Paulo';
 export const money = (cents: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
+export function isMeasured(rental: { byMeasurement?: number }): boolean {
+    return rental.byMeasurement === 1;
+}
+export function contractedLabel(rental: { byMeasurement?: number; priceCents: number }): string {
+    return isMeasured(rental) ? 'Por medição' : money(rental.priceCents);
+}
+export function balanceLabel(rental: { byMeasurement?: number; priceCents: number; status?: string }, paid: number): string {
+    if (rental.status === 'CANCELLED')
+        return 'Cancelado';
+    return isMeasured(rental) ? 'Por medição' : money(rental.priceCents - paid);
+}
 export function toLocalInput(value: string | Date): string {
     const d = new Date(value);
     if (!Number.isFinite(d.getTime()))

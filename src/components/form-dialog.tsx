@@ -20,7 +20,7 @@ export interface Field {
     full?: boolean;
     when?: {
         field: string;
-        value: string;
+        value: string | boolean;
     };
 }
 export interface FormConfig {

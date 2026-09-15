@@ -269,6 +269,20 @@ test('rescheduling preserves old and new assignments in history and never change
 finally {
     f.close();
 } });
+test('measurement billing stores no contracted price and still accepts receipts', () => { const f = fixture(); try {
+    const id = f.create({ byMeasurement: true, priceCents: 99999 });
+    const rental = f.rental(id);
+    assert.equal(rental.byMeasurement, 1);
+    assert.equal(rental.priceCents, 0);
+    f.run('addPayment', { rentalId: id, amountCents: 12345, method: 'PIX', paidAt: NOW, note: 'medicao' });
+    f.run('addPayment', { rentalId: id, amountCents: 8000, method: 'CASH', paidAt: NOW, note: '' });
+    assert.equal(row<{
+        n: number;
+    }>(f.db, 'SELECT SUM(amountCents) n FROM payments')!.n, 20345);
+}
+finally {
+    f.close();
+} });
 test('received values are integer cents; partial payments and overpayment protection', () => { const f = fixture(); try {
     const id = f.create();
     f.run('addPayment', { rentalId: id, amountCents: 20000, method: 'PIX', paidAt: NOW, note: '' });

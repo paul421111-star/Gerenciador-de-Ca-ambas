@@ -71,6 +71,7 @@ export interface Rental {
     returnedAt: string | null;
     status: RentalStatus;
     priceCents: number;
+    byMeasurement: number;
     version: number;
     createdBy: string;
     createdAt: string;

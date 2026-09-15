@@ -21,7 +21,15 @@ export function openDatabase(path: string): DB {
         mkdirSync(dirname(resolve(path)), { recursive: true });
     const db = new DatabaseSync(path);
     db.exec('PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
-    tx(db, () => { db.exec(SCHEMA); db.prepare('INSERT OR IGNORE INTO settings(id,json) VALUES(1,?)').run(JSON.stringify(DEFAULT_SETTINGS)); db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(1,?)').run(new Date().toISOString()); });
+    tx(db, () => {
+        db.exec(SCHEMA);
+        db.prepare('INSERT OR IGNORE INTO settings(id,json) VALUES(1,?)').run(JSON.stringify(DEFAULT_SETTINGS));
+        db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(1,?)').run(new Date().toISOString());
+        const columns = rows<{ name: string }>(db, 'PRAGMA table_info(rentals)');
+        if (!columns.some(column => column.name === 'byMeasurement'))
+            db.exec('ALTER TABLE rentals ADD COLUMN byMeasurement INTEGER NOT NULL DEFAULT 0');
+        db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(2,?)').run(new Date().toISOString());
+    });
     if (path !== ':memory:') {
         try {
             chmodSync(path, 0o600);
