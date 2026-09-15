@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { sameOrigin, readJson, sessionCookie, cookieToken } from '../src/server/http.ts';
+import { AppError } from '../src/server/errors.ts';
+const request = (body = '{}', headers: Record<string, string> = {}) => new Request('http://localhost:3000/api/command', { method: 'POST', headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', ...headers }, body });
+test('same-origin JSON mutation is accepted', () => assert.doesNotThrow(() => sameOrigin(request())));
+test('external origin and cross-site fetch are rejected', () => { assert.throws(() => sameOrigin(request('{}', { origin: 'https://evil.test' })), AppError); assert.throws(() => sameOrigin(request('{}', { 'sec-fetch-site': 'cross-site' })), AppError); });
+test('missing Origin cannot mutate authenticated state', () => assert.throws(() => sameOrigin(new Request('http://localhost:3000/api/command', { method: 'POST', body: '{}' })), AppError));
+test('body size and content-type are enforced before parsing', async () => { await assert.rejects(() => readJson(request('x'.repeat(50)), 20), { status: 413 }); await assert.rejects(() => readJson(request('{}', { 'content-type': 'text/plain' })), { status: 415 }); });
+test('invalid JSON returns a controlled error', async () => await assert.rejects(() => readJson(request('{broken')), { status: 400 }));
+test('session cookies are HttpOnly, strict same-site and expire', () => { const c = sessionCookie('opaque'); assert.match(c, /HttpOnly/); assert.match(c, /SameSite=Strict/); assert.match(c, /Max-Age=43200/); assert.match(sessionCookie('', true), /Max-Age=0/); });
+test('cookie parser does not confuse suffix/prefix names', () => { const r = new Request('http://localhost:3000', { headers: { cookie: 'not_jr_session=bad; jr_session=correct; x=1' } }); assert.equal(cookieToken(r), 'correct'); });

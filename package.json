@@ -1,0 +1,39 @@
+{
+  "name": "jr-cacambas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "setup": "node --experimental-strip-types scripts/setup.mjs",
+    "demo": "node --experimental-strip-types scripts/setup.mjs --demo",
+    "backup": "node --experimental-strip-types scripts/backup.mjs",
+    "admin:reset": "node --experimental-strip-types scripts/reset-password.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/domain.test.ts tests/security.test.ts tests/api.test.ts tests/cep.test.ts",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm test && npm run build",
+    "test:syntax": "node scripts/check-syntax.mjs",
+    "dev:demo": "node scripts/dev-demo.mjs",
+    "doctor": "node scripts/verify-environment.mjs",
+    "typecheck:core": "tsc --project tsconfig.core.json",
+    "db:check": "node scripts/check-database.mjs"
+  },
+  "dependencies": {
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.7",
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "typescript": "5.8.3",
+    "@playwright/test": "1.58.0"
+  }
+}

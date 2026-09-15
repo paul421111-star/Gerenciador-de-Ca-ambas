@@ -1,0 +1,40 @@
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { mkdirSync, chmodSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { SCHEMA } from './schema.ts';
+import type { Settings } from '../shared/types.ts';
+export type DB = DatabaseSync;
+export const DEFAULT_SETTINGS: Settings = { companyName: 'JR Caçambas', companyPhone: '', yardAddress: '', defaultDays: 7, defaultPriceCents: 0, jobDurationMinutes: 60, demo: false, timezone: 'America/Sao_Paulo' };
+export function row<T = Record<string, unknown>>(db: DB, sql: string, ...args: SQLInputValue[]): T | undefined { return db.prepare(sql).get(...args) as T | undefined; }
+export function rows<T = Record<string, unknown>>(db: DB, sql: string, ...args: SQLInputValue[]): T[] { return db.prepare(sql).all(...args) as unknown as T[]; }
+export function tx<T>(db: DB, fn: () => T, readOnly = false): T { db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE'); try {
+    const value = fn();
+    db.exec('COMMIT');
+    return value;
+}
+catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+} }
+export function openDatabase(path: string): DB {
+    if (path !== ':memory:')
+        mkdirSync(dirname(resolve(path)), { recursive: true });
+    const db = new DatabaseSync(path);
+    db.exec('PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+    tx(db, () => { db.exec(SCHEMA); db.prepare('INSERT OR IGNORE INTO settings(id,json) VALUES(1,?)').run(JSON.stringify(DEFAULT_SETTINGS)); db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(1,?)').run(new Date().toISOString()); });
+    if (path !== ':memory:') {
+        try {
+            chmodSync(path, 0o600);
+        }
+        catch { /* Windows permissions are managed by the OS. */ }
+    }
+    return db;
+}
+export function settings(db: DB): Settings { return { ...DEFAULT_SETTINGS, ...JSON.parse(row<{
+        json: string;
+    }>(db, 'SELECT json FROM settings WHERE id=1')!.json) }; }
+export const databasePath = () => resolve(process.env.DATABASE_PATH || './data/jr.sqlite');
+const state = globalThis as unknown as {
+    jrDB?: DB;
+};
+export function database(): DB { return state.jrDB ??= openDatabase(databasePath()); }

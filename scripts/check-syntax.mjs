@@ -1,0 +1,3 @@
+import ts from 'typescript';import {readdirSync,readFileSync} from 'node:fs';import {join} from 'node:path';
+let count=0,errors=0;function walk(dir){for(const entry of readdirSync(dir,{withFileTypes:true})){const path=join(dir,entry.name);if(entry.isDirectory())walk(path);else if(/\.(ts|tsx)$/.test(path)){const source=ts.createSourceFile(path,readFileSync(path,'utf8'),ts.ScriptTarget.Latest,true,path.endsWith('.tsx')?ts.ScriptKind.TSX:ts.ScriptKind.TS);count++;for(const d of source.parseDiagnostics){errors++;console.error(path,ts.flattenDiagnosticMessageText(d.messageText,'\n'));}}}}
+walk('src');walk('tests');console.log(`${count} arquivos TypeScript analisados; ${errors} erros de sintaxe.`);process.exitCode=errors?1:0;

@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: production
+      APP_URL: ${APP_URL:?Defina APP_URL com seu dominio HTTPS no arquivo .env}
+      DATABASE_PATH: /app/data/jr.sqlite
+      BACKUP_DIR: /app/backups
+    volumes:
+      - jr_data:/app/data
+      - jr_backups:/app/backups
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  jr_data:
+  jr_backups:

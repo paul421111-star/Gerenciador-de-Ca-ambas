@@ -1,0 +1,322 @@
+[
+  {
+    "page": "agenda",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "ajuda",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "auditoria",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "cacambas",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 2973,
+    "overflow": false
+  },
+  {
+    "page": "clientes",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1115,
+    "overflow": false
+  },
+  {
+    "page": "configuracoes",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1074,
+    "overflow": false
+  },
+  {
+    "page": "conta",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "detalhe",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1617,
+    "overflow": false
+  },
+  {
+    "page": "financeiro",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 4722,
+    "overflow": false
+  },
+  {
+    "page": "frota",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "locacoes",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1617,
+    "overflow": false
+  },
+  {
+    "page": "login",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "manutencoes",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "mapa",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "minha-rota",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "motoristas",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "ordem",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1874,
+    "overflow": false
+  },
+  {
+    "page": "painel",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1749,
+    "overflow": false
+  },
+  {
+    "page": "relatorios",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 3584,
+    "overflow": false
+  },
+  {
+    "page": "usuarios",
+    "width": 1440,
+    "scroll": 1440,
+    "client": 1440,
+    "height": 1040,
+    "overflow": false
+  },
+  {
+    "page": "agenda",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 911,
+    "overflow": false
+  },
+  {
+    "page": "ajuda",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 1554,
+    "overflow": false
+  },
+  {
+    "page": "auditoria",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 844,
+    "overflow": false
+  },
+  {
+    "page": "cacambas",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 7499,
+    "overflow": false
+  },
+  {
+    "page": "clientes",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 1830,
+    "overflow": false
+  },
+  {
+    "page": "configuracoes",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 1916,
+    "overflow": false
+  },
+  {
+    "page": "conta",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 844,
+    "overflow": false
+  },
+  {
+    "page": "detalhe",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 2155,
+    "overflow": false
+  },
+  {
+    "page": "financeiro",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 5479,
+    "overflow": false
+  },
+  {
+    "page": "frota",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 1346,
+    "overflow": false
+  },
+  {
+    "page": "locacoes",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 2155,
+    "overflow": false
+  },
+  {
+    "page": "login",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 844,
+    "overflow": false
+  },
+  {
+    "page": "manutencoes",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 844,
+    "overflow": false
+  },
+  {
+    "page": "mapa",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 1231,
+    "overflow": false
+  },
+  {
+    "page": "minha-rota",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 844,
+    "overflow": false
+  },
+  {
+    "page": "motoristas",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 844,
+    "overflow": false
+  },
+  {
+    "page": "ordem",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 2217,
+    "overflow": false
+  },
+  {
+    "page": "painel",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 2691,
+    "overflow": false
+  },
+  {
+    "page": "relatorios",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 4752,
+    "overflow": false
+  },
+  {
+    "page": "usuarios",
+    "width": 390,
+    "scroll": 390,
+    "client": 390,
+    "height": 844,
+    "overflow": false
+  }
+]
