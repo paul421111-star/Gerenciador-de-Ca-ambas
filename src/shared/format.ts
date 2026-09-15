@@ -11,6 +11,9 @@ export function balanceLabel(rental: { byMeasurement?: number; priceCents: numbe
         return 'Cancelado';
     return isMeasured(rental) ? 'Por medição' : money(rental.priceCents - paid);
 }
+export function isOpenEndedPickup(rental: { openEndedPickup?: number }): boolean {
+    return rental.openEndedPickup === 1;
+}
 export function toLocalInput(value: string | Date): string {
     const d = new Date(value);
     if (!Number.isFinite(d.getTime()))

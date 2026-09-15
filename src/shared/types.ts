@@ -72,6 +72,7 @@ export interface Rental {
     status: RentalStatus;
     priceCents: number;
     byMeasurement: number;
+    openEndedPickup: number;
     version: number;
     createdBy: string;
     createdAt: string;

@@ -269,6 +269,22 @@ test('rescheduling preserves old and new assignments in history and never change
 finally {
     f.close();
 } });
+test('open-ended pickup skips a scheduled collection and records the real time later', () => { const f = fixture(); try {
+    const id = f.create({ openEndedPickup: true });
+    const rental = f.rental(id);
+    assert.equal(rental.openEndedPickup, 1);
+    assert.equal(rows(f.db, "SELECT * FROM jobs WHERE rentalId=? AND kind='PICKUP'", id).length, 0);
+    f.transition(id, 'start_delivery');
+    f.transition(id, 'complete_delivery');
+    assert.equal(f.rental(id).status, 'ACTIVE');
+    f.transition(id, 'start_pickup', '2026-09-18T14:00:00.000Z', { pickupDriverId: 'd1', pickupTruckId: 't1', durationMinutes: 60 });
+    assert.equal(f.rental(id).status, 'COLLECTING');
+    f.transition(id, 'complete_pickup', '2026-09-18T14:30:00.000Z');
+    assert.equal(f.rental(id).pickedUpAt, '2026-09-18T14:30:00.000Z');
+}
+finally {
+    f.close();
+} });
 test('measurement billing stores no contracted price and still accepts receipts', () => { const f = fixture(); try {
     const id = f.create({ byMeasurement: true, priceCents: 99999 });
     const rental = f.rental(id);

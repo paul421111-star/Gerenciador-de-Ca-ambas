@@ -29,6 +29,9 @@ export function openDatabase(path: string): DB {
         if (!columns.some(column => column.name === 'byMeasurement'))
             db.exec('ALTER TABLE rentals ADD COLUMN byMeasurement INTEGER NOT NULL DEFAULT 0');
         db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(2,?)').run(new Date().toISOString());
+        if (!columns.some(column => column.name === 'openEndedPickup'))
+            db.exec('ALTER TABLE rentals ADD COLUMN openEndedPickup INTEGER NOT NULL DEFAULT 0');
+        db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(3,?)').run(new Date().toISOString());
     });
     if (path !== ':memory:') {
         try {

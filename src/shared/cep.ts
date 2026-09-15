@@ -102,18 +102,20 @@ export function applyCepResult(values: Record<string, unknown>, fields: { name: 
         next.city = city;
     if (names.has('cidade') && city)
         next.cidade = city;
-    if (names.has('address') && !String(next.address ?? '').trim()) {
-        next.address = names.has('neighborhood') || names.has('city')
-            ? address.street
-            : [address.street, address.neighborhood, city].filter(Boolean).join(', ');
+    const full = [address.street, address.neighborhood, city].filter(Boolean).join(', ');
+    if (names.has('address')) {
+        if (names.has('neighborhood') || names.has('city')) {
+            if (address.street)
+                next.address = address.street;
+        }
+        else if (full)
+            next.address = full;
     }
-    if (names.has('yardAddress') && !String(next.yardAddress ?? '').trim())
-        next.yardAddress = [address.street, address.neighborhood, city].filter(Boolean).join(', ');
+    if (names.has('yardAddress') && full)
+        next.yardAddress = full;
     if (names.has('latitude') && names.has('longitude') && address.latitude != null && address.longitude != null) {
-        if (next.latitude == null || next.latitude === '')
-            next.latitude = address.latitude;
-        if (next.longitude == null || next.longitude === '')
-            next.longitude = address.longitude;
+        next.latitude = address.latitude;
+        next.longitude = address.longitude;
     }
     return next;
 }

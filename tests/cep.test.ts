@@ -33,6 +33,11 @@ test('CEP result fills neighborhood and city on any matching form fields', () =>
     assert.equal(filled.latitude, -23.6);
     const customer = applyCepResult({}, [{ name: 'postalCode' }, { name: 'address' }], address);
     assert.equal(customer.address, 'Rua Exemplo, Granja Viana, Cotia / SP');
+    const replaced = applyCepResult({ address: 'Rua Antiga, 88', neighborhood: 'Centro', city: 'Taboão da Serra / SP', latitude: -23.62, longitude: -46.79 }, [{ name: 'postalCode' }, { name: 'neighborhood' }, { name: 'city' }, { name: 'address' }, { name: 'latitude' }, { name: 'longitude' }], { cep: '06825070', street: 'Rua Nova', neighborhood: 'Parque das Chácaras', city: 'Embu das Artes', state: 'SP', latitude: -23.65, longitude: -46.85 });
+    assert.equal(replaced.address, 'Rua Nova');
+    assert.equal(replaced.neighborhood, 'Parque das Chácaras');
+    assert.equal(replaced.city, 'Embu das Artes / SP');
+    assert.equal(replaced.latitude, -23.65);
 });
 test('lookupCep rejects incomplete values before calling the provider', async () => {
     await assert.rejects(() => lookupCep('123', async () => { throw new Error('should not fetch'); }), (e: unknown) => e instanceof AppError && e.status === 400);

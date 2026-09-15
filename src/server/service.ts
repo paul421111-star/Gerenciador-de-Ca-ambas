@@ -19,6 +19,16 @@ function billing(p: Record<string, unknown>): { byMeasurement: number; priceCent
     const byMeasurement = p.byMeasurement === true || p.byMeasurement === 1;
     return byMeasurement ? { byMeasurement: 1, priceCents: 0 } : { byMeasurement: 0, priceCents: v.integer(p, "priceCents", 0, 100000000) };
 }
+function flagged(p: Record<string, unknown>, key: string): boolean {
+    return p[key] === true || p[key] === 1;
+}
+function plannedPickup(p: Record<string, unknown>, deliveryAt: string, duration: number): { openEndedPickup: number; pickupAt: string } {
+    if (flagged(p, "openEndedPickup"))
+        return { openEndedPickup: 1, pickupAt: new Date(Date.parse(deliveryAt) + 365 * 86400000).toISOString() };
+    const pickupAt = v.iso(p, "pickupAt");
+    assert(Date.parse(pickupAt) >= Date.parse(deliveryAt) + (duration + 15) * 60000, "A retirada deve ocorrer após a janela de entrega, com pelo menos 15 minutos de intervalo.");
+    return { openEndedPickup: 0, pickupAt };
+}
 function event(db: DB, user: User, rentalId: string, action: string, description: string, now: string, gps = { latitude: null as number | null, longitude: null as number | null }) {
     db.prepare("INSERT INTO rentalEvents(id,rentalId,action,description,actorId,occurredAt,latitude,longitude) VALUES(?,?,?,?,?,?,?,?)").run(randomUUID(), rentalId, action, description, user.id, now, gps.latitude, gps.longitude);
 }
@@ -56,20 +66,21 @@ function createRental(db: DB, u: User, p: Record<string, unknown>, now: string):
     assert(container.capacityM3, "Informe a capacidade da caçamba no inventário.");
     assert(find<Customer>(db, "customers", customerId).active === 1, "O cliente está inativo.");
     assert(settings(db).yardAddress.length >= 5, "Configure o endereço do pátio antes de iniciar a operação.");
-    const deliveryAt = v.iso(p, "deliveryAt"), pickupAt = v.iso(p, "pickupAt"), duration = v.integer(p, "durationMinutes", 15, 480, 60);
+    const deliveryAt = v.iso(p, "deliveryAt"), duration = v.integer(p, "durationMinutes", 15, 480, 60);
     assert(Date.parse(deliveryAt) >= Date.parse(now) - 300000, "A entrega deve ser agendada para agora ou para o futuro. Movimentações reais são registradas na execução.");
-    assert(Date.parse(pickupAt) >= Date.parse(deliveryAt) + (duration + 15) * 60000, "A retirada deve ocorrer após a janela de entrega, com pelo menos 15 minutos de intervalo.");
+    const pickup = plannedPickup(p, deliveryAt, duration);
     const count = row<{
         n: number;
     }>(db, "SELECT COUNT(*) n FROM rentals")!.n + 1;
     const code = `LOC-${String(count).padStart(5, "0")}`;
     const g = v.coordinates(p), bill = billing(p);
-    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), v.str(p, "notes", 0, 2000), deliveryAt, pickupAt, bill.priceCents, bill.byMeasurement, u.id, now];
-    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,priceCents,byMeasurement,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED')").run(...values);
+    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), v.str(p, "notes", 0, 2000), deliveryAt, pickup.pickupAt, bill.priceCents, bill.byMeasurement, pickup.openEndedPickup, u.id, now];
+    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,priceCents,byMeasurement,openEndedPickup,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED')").run(...values);
     schedule(db, id, "DELIVERY", v.str(p, "deliveryDriverId", 1), v.str(p, "deliveryTruckId", 1), deliveryAt, duration);
-    schedule(db, id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), pickupAt, duration);
+    if (!pickup.openEndedPickup)
+        schedule(db, id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), pickup.pickupAt, duration);
     db.prepare("UPDATE containers SET status='RESERVED' WHERE id=?").run(containerId);
-    event(db, u, id, "created", `Reserva ${code} criada. Caçamba ${container.code} separada para este cliente.${bill.byMeasurement ? ' Cobrança por medição, sem valor fechado.' : ''}`, now);
+    event(db, u, id, "created", `Reserva ${code} criada. Caçamba ${container.code} separada para este cliente.${bill.byMeasurement ? ' Cobrança por medição, sem valor fechado.' : ''}${pickup.openEndedPickup ? ' Retirada sem data certa, combinada depois.' : ''}`, now);
     return { id, message: `Locação ${code} agendada com entrega e retirada.` };
 }
 function importActiveRental(db: DB, u: User, p: Record<string, unknown>, now: string): CommandResult {
@@ -78,9 +89,11 @@ function importActiveRental(db: DB, u: User, p: Record<string, unknown>, now: st
     assert(p.confirmed === true, "Confirme que esta caçamba já está fisicamente neste cliente.");
     assert(find<Customer>(db, "customers", customerId).active === 1, "O cliente está inativo.");
     assert(settings(db).yardAddress.length >= 5, "Configure o endereço do pátio.");
-    const deliveryAt = v.iso(p, "deliveryAt"), pickupAt = v.iso(p, "pickupAt"), duration = v.integer(p, "durationMinutes", 15, 480, 60), capacity = v.num(p, "capacityM3", 0.5, 50);
+    const deliveryAt = v.iso(p, "deliveryAt"), duration = v.integer(p, "durationMinutes", 15, 480, 60), capacity = v.num(p, "capacityM3", 0.5, 50);
     assert(deliveryAt <= now, "Na abertura, informe a entrega que já aconteceu.");
-    assert(pickupAt > now && Date.parse(pickupAt) > Date.parse(deliveryAt) + 15 * 60000, "Programe uma retirada futura, posterior à entrega.");
+    const pickup = plannedPickup(p, deliveryAt, duration);
+    if (!pickup.openEndedPickup)
+        assert(pickup.pickupAt > now, "Programe uma retirada futura, posterior à entrega.");
     const deliveryDriver = v.str(p, "deliveryDriverId", 1), deliveryTruck = v.str(p, "deliveryTruckId", 1);
     find<Driver>(db, "drivers", deliveryDriver);
     find<Truck>(db, "trucks", deliveryTruck);
@@ -88,16 +101,17 @@ function importActiveRental(db: DB, u: User, p: Record<string, unknown>, now: st
         n: number;
     }>(db, "SELECT COUNT(*) n FROM rentals")!.n + 1).padStart(5, "0")}`, g = v.coordinates(p), bill = billing(p);
     const notes = `ABERTURA DE OPERAÇÃO: entrega passada declarada pelo administrador, não executada pelo aplicativo. A previsão de entrega utiliza a data declarada como referência. ${v.str(p, "notes", 0, 1800)}`;
-    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), notes, deliveryAt, pickupAt, deliveryAt, bill.priceCents, bill.byMeasurement, u.id, now];
-    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,deliveredAt,priceCents,byMeasurement,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE')").run(...values);
+    const values = [id, code, containerId, customerId, v.str(p, "address", 5, 240), v.str(p, "neighborhood", 2, 100), v.str(p, "city", 2, 100), v.str(p, "postalCode", 0, 12), v.str(p, "siteContact", 2, 120), v.phone(p, "sitePhone"), g.latitude, g.longitude, v.str(p, "wasteType", 2, 100), notes, deliveryAt, pickup.pickupAt, deliveryAt, bill.priceCents, bill.byMeasurement, pickup.openEndedPickup, u.id, now];
+    db.prepare("INSERT INTO rentals(id,code,containerId,customerId,address,neighborhood,city,postalCode,siteContact,sitePhone,latitude,longitude,wasteType,notes,deliveryAt,pickupAt,deliveredAt,priceCents,byMeasurement,openEndedPickup,createdBy,createdAt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE')").run(...values);
     db.prepare("INSERT INTO jobs(id,rentalId,kind,driverId,truckId,scheduledAt,durationMinutes,status,completedAt) VALUES(?,?,'DELIVERY',?,?,?,?,'DONE',?)").run(randomUUID(), id, deliveryDriver, deliveryTruck, deliveryAt, duration, deliveryAt);
-    schedule(db, id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), pickupAt, duration);
+    if (!pickup.openEndedPickup)
+        schedule(db, id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), pickup.pickupAt, duration);
     db.prepare("UPDATE containers SET capacityM3=?,status='ON_SITE' WHERE id=?").run(capacity, containerId);
     event(db, u, id, "opening_import", `Abertura declarada por ${u.name}: ${container.code} já estava no cliente. Entrega informada: ${dateTime(deliveryAt)}. A saída real do caminhão não foi registrada neste sistema.`, now);
     return { id, message: "Locação existente registrada e retirada programada. Confira os recebimentos anteriores separadamente." };
 }
 function transitionRental(db: DB, u: User, p: Record<string, unknown>, now: string): CommandResult {
-    const r = find<Rental>(db, "rentals", v.str(p, "id", 1));
+    let r = find<Rental>(db, "rentals", v.str(p, "id", 1));
     checkVersion(r, p);
     const action = v.choice(p, "action", ["start_delivery", "complete_delivery", "start_pickup", "complete_pickup", "return_yard", "cancel", "abort_delivery", "abort_pickup"] as const);
     const notes = v.str(p, "notes", 0, 1000), gps = v.coordinates(p);
@@ -114,7 +128,15 @@ function transitionRental(db: DB, u: User, p: Record<string, unknown>, now: stri
         return { id: r.id, message: "Locação cancelada; caçamba liberada." };
     }
     const kind = action.includes("delivery") ? "DELIVERY" : "PICKUP";
-    const job = row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind=?", r.id, kind)!;
+    let job = row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind=?", r.id, kind);
+    if (!job && action === "start_pickup" && r.openEndedPickup) {
+        const duration = v.integer(p, "durationMinutes", 15, 480, settings(db).jobDurationMinutes);
+        schedule(db, r.id, "PICKUP", v.str(p, "pickupDriverId", 1), v.str(p, "pickupTruckId", 1), now, duration);
+        db.prepare("UPDATE rentals SET pickupAt=?,version=version+1 WHERE id=?").run(now, r.id);
+        r = find<Rental>(db, "rentals", r.id);
+        job = row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind=?", r.id, kind);
+    }
+    assert(job, "Programe a retirada antes de executar esta etapa.", 409);
     assert(u.role !== "DRIVER" || job.driverId === u.driverId, "Este serviço está atribuído a outro motorista.", 403);
     if (action === "abort_delivery" || action === "abort_pickup") {
         assert(job.status === "IN_PROGRESS", "A tentativa de serviço não está em andamento.", 409);
@@ -131,7 +153,7 @@ function transitionRental(db: DB, u: User, p: Record<string, unknown>, now: stri
         checkResource(db, job.driverId, job.truckId, now);
         assert(!row(db, "SELECT id FROM jobs WHERE id!=? AND status IN ('IN_PROGRESS','RETURNING') AND (driverId=? OR truckId=?)", job.id, job.driverId, job.truckId), "Caminhão ou motorista ainda possui uma operação em andamento. Finalize o retorno anterior.", 409);
         checkSlot(db, job.driverId, job.truckId, now, job.durationMinutes, job.id);
-        if (action === "start_delivery")
+        if (action === "start_delivery" && !r.openEndedPickup)
             assert(Date.parse(r.pickupAt) > Date.parse(now) + job.durationMinutes * 60000, "A entrega atrasou. Reagende a retirada antes de sair.", 409);
         db.prepare("UPDATE jobs SET status='IN_PROGRESS',startedAt=?,version=version+1 WHERE id=?").run(now, job.id);
         db.prepare("UPDATE rentals SET status=?,version=version+1 WHERE id=?").run(action === "start_delivery" ? "DELIVERING" : "COLLECTING", r.id);
@@ -141,7 +163,8 @@ function transitionRental(db: DB, u: User, p: Record<string, unknown>, now: stri
     else if (action === "complete_delivery") {
         assert(job.status === "IN_PROGRESS", "A entrega ainda não foi iniciada.", 409);
         const receiver = v.str(p, "receiver", 2, 120);
-        assert(r.pickupAt > now, "Reagende a retirada: o prazo previsto já passou.", 409);
+        if (!r.openEndedPickup)
+            assert(r.pickupAt > now, "Reagende a retirada: o prazo previsto já passou.", 409);
         db.prepare("UPDATE jobs SET status='DONE',completedAt=?,version=version+1 WHERE id=?").run(now, job.id);
         db.prepare("UPDATE rentals SET status='ACTIVE',deliveredAt=?,version=version+1 WHERE id=?").run(now, r.id);
         db.prepare("UPDATE containers SET status='ON_SITE' WHERE id=?").run(r.containerId);
@@ -178,7 +201,7 @@ function reschedule(db: DB, u: User, p: Record<string, unknown>, now: string): C
     const r = find<Rental>(db, "rentals", j.rentalId), at = v.iso(p, "scheduledAt"), duration = v.integer(p, "durationMinutes", 15, 480);
     assert(at >= now, "Escolha um horário futuro.");
     const driverId = v.str(p, "driverId", 1), truckId = v.str(p, "truckId", 1), reason = v.str(p, "reason", 5, 1000);
-    if (j.kind === "DELIVERY")
+    if (j.kind === "DELIVERY" && !r.openEndedPickup)
         assert(Date.parse(at) + (duration + 15) * 60000 <= Date.parse(r.pickupAt), "A nova entrega deve terminar antes da retirada, com 15 minutos de intervalo.");
     else {
         const delivery = row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind='DELIVERY'", r.id)!;

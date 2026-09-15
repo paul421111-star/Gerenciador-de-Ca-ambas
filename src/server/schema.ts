@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS rentals (
  latitude REAL, longitude REAL, wasteType TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', deliveryAt TEXT NOT NULL, pickupAt TEXT NOT NULL,
  deliveredAt TEXT, pickedUpAt TEXT, returnedAt TEXT,
  status TEXT NOT NULL CHECK(status IN ('RESERVED','DELIVERING','ACTIVE','COLLECTING','RETURNING','COMPLETED','CANCELLED')),
- priceCents INTEGER NOT NULL CHECK(priceCents >= 0), byMeasurement INTEGER NOT NULL DEFAULT 0 CHECK(byMeasurement IN (0,1)), version INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL REFERENCES users(id), createdAt TEXT NOT NULL,
+ priceCents INTEGER NOT NULL CHECK(priceCents >= 0), byMeasurement INTEGER NOT NULL DEFAULT 0 CHECK(byMeasurement IN (0,1)), openEndedPickup INTEGER NOT NULL DEFAULT 0 CHECK(openEndedPickup IN (0,1)), version INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL REFERENCES users(id), createdAt TEXT NOT NULL,
  CHECK(pickupAt > deliveryAt), CHECK((latitude IS NULL) = (longitude IS NULL)),
  CHECK(latitude IS NULL OR (latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180))
 );
