@@ -92,3 +92,5 @@ O projeto inclui 5 cenários E2E com banco isolado; eles estão entregues para e
 Use um servidor Node com **disco persistente**, ou o Docker Compose incluído, com uma instância da aplicação. A base foi projetada para instalação local/VPS, não para SQLite em armazenamento efêmero/serverless.
 
 O mapa não é rastreamento contínuo. Não há geocodificação automática, sincronização offline, cobrança bancária Pix/cartão, nota fiscal, envio de WhatsApp, assinatura digital, upload de fotos ou roteirização otimizada. A impressão permite salvar PDF pelo navegador; não existe geração fiscal no backend. Essas integrações podem ser adicionadas posteriormente sem confundi-las com os recursos entregues.
+
+Repositório: https://github.com/paul421111-star/Gerenciador-de-Ca-ambas
