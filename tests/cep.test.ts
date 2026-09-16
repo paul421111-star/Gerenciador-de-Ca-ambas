@@ -48,7 +48,7 @@ test('lookupCep uses BrasilAPI and falls back to ViaCEP', async () => {
     assert.equal(brasil.neighborhood, 'Granja Viana');
     assert.equal(brasil.latitude, -23.6);
     const via = await lookupCep('01310100', async (url) => {
-        if (url.includes('brasilapi'))
+        if (String(url).includes('brasilapi'))
             return new Response(JSON.stringify({ message: 'erro' }), { status: 404 });
         return new Response(JSON.stringify({ cep: '01310-100', logradouro: 'Avenida Paulista', bairro: 'Bela Vista', localidade: 'São Paulo', uf: 'SP' }));
     });

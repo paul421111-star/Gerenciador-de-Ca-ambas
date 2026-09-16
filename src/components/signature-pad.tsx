@@ -86,7 +86,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, {
         }
     }));
     if (saved)
-        return <div className="signature-slot"><img className="signature-image" src={saved.image} alt={`Assinatura de ${saved.signerName}`}/><strong>{saved.signerName}</strong><small>Assinado em {dateTime(saved.signedAt)}</small><span>{label}</span></div>;
+        return <div className="signature-slot">{saved.image ? <img className="signature-image" src={saved.image} alt={`Assinatura de ${saved.signerName}`}/> : <div className="signature-image" aria-hidden="true"/>}<strong>{saved.signerName}</strong><small>Assinado em {dateTime(saved.signedAt)}</small><span>{label}</span></div>;
     return <div className="signature-slot"><label className="signature-name"><span>Nome</span><input value={name} onChange={e => setName(e.target.value)} maxLength={120} autoComplete="name"/></label>
         <canvas ref={canvasRef} className="signature-canvas" width={320} height={96} onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerLeave={end}/>
         <div className="row split"><span>{label}</span><button type="button" className="text-button no-print" onClick={clear} disabled={!ink}>Limpar</button></div></div>;

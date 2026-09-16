@@ -3,7 +3,7 @@ import { type DB, row, rows, tx, settings } from "./db.ts";
 import { assert, AppError } from "./errors.ts";
 import * as v from "./validate.ts";
 import { createAccount, hashPassword, verifyPassword, USER_COLUMNS, sha256 } from "./auth.ts";
-import { dateKey, dateTime } from "../shared/format.ts";
+import { dateKey, dateTime, money } from "../shared/format.ts";
 import { rentalGroupCatalog } from "../shared/rental-groups.ts";
 import { isSignatureImage } from "../shared/signature.ts";
 import type { CommandResult, Container, Customer, CustomerSite, Driver, Truck, User, Rental, Job, Payment, Maintenance, RentalEvent, Audit, Snapshot, Settings, RentalSignature, RentalSignatureRevision } from "../shared/types.ts";
@@ -60,6 +60,9 @@ export async function checkSlot(db: DB, driverId: string, truckId: string, start
     const conflict = candidates.find(j => Date.parse(start) < Date.parse(j.scheduledAt) + j.durationMinutes * 60000 && end > Date.parse(j.scheduledAt));
     assert(!conflict, `Conflito de agenda: motorista ou caminhão já possui serviço em ${conflict ? dateTime(conflict.scheduledAt) : "este horário"}. Reserve um intervalo sem sobreposição.`, 409);
 }
+async function assertTeamIdle(db: DB, driverId: string, truckId: string, exceptId = "") {
+    assert(!await row(db, "SELECT id FROM jobs WHERE id!=? AND status IN ('IN_PROGRESS','RETURNING') AND (driverId=? OR truckId=?)", exceptId, driverId, truckId), "Caminhão ou motorista ainda possui uma operação em andamento. Finalize o retorno anterior.", 409);
+}
 async function optionalSite(db: DB, p: Record<string, unknown>, customerId: string): Promise<string | null> {
     const siteId = v.str(p, "siteId", 0);
     if (!siteId)
@@ -108,8 +111,10 @@ async function importActiveRental(db: DB, u: User, p: Record<string, unknown>, n
     const deliveryAt = v.iso(p, "deliveryAt"), duration = v.integer(p, "durationMinutes", 15, 480, 60), capacity = v.num(p, "capacityM3", 0.5, 50);
     assert(deliveryAt <= now, "Na abertura, informe a entrega que já aconteceu.");
     const pickup = plannedPickup(p, deliveryAt, duration);
-    if (!pickup.openEndedPickup)
-        assert(Boolean(pickup.pickupAt) && pickup.pickupAt > now, "Programe uma retirada futura, posterior à entrega.");
+    if (!pickup.openEndedPickup) {
+        const pickupAt = pickup.pickupAt;
+        assert(pickupAt != null && pickupAt > now, "Programe uma retirada futura, posterior à entrega.");
+    }
     const deliveryDriver = v.str(p, "deliveryDriverId", 1), deliveryTruck = v.str(p, "deliveryTruckId", 1);
     await find<Driver>(db, "drivers", deliveryDriver);
     await find<Truck>(db, "trucks", deliveryTruck);
@@ -167,7 +172,7 @@ async function transitionRental(db: DB, u: User, p: Record<string, unknown>, now
     if (action.startsWith("start_")) {
         assert(job.status === "SCHEDULED", "O serviço já foi iniciado.", 409);
         await checkResource(db, job.driverId, job.truckId, now);
-        assert(!await row(db, "SELECT id FROM jobs WHERE id!=? AND status IN ('IN_PROGRESS','RETURNING') AND (driverId=? OR truckId=?)", job.id, job.driverId, job.truckId), "Caminhão ou motorista ainda possui uma operação em andamento. Finalize o retorno anterior.", 409);
+        await assertTeamIdle(db, job.driverId, job.truckId, job.id);
         await checkSlot(db, job.driverId, job.truckId, now, job.durationMinutes, job.id);
         if (action === "start_delivery" && r.pickupAt)
             assert(Date.parse(r.pickupAt) > Date.parse(now) + job.durationMinutes * 60000, "A entrega atrasou. Reagende a retirada antes de sair.", 409);
@@ -213,7 +218,7 @@ async function transitionRental(db: DB, u: User, p: Record<string, unknown>, now
 async function startPickupNow(db: DB, job: Job, rentalId: string, now: string): Promise<Job> {
     assert(job.status === "SCHEDULED", "O serviço já foi iniciado.", 409);
     await checkResource(db, job.driverId, job.truckId, now);
-    assert(!await row(db, "SELECT id FROM jobs WHERE id!=? AND status IN ('IN_PROGRESS','RETURNING') AND (driverId=? OR truckId=?)", job.id, job.driverId, job.truckId), "Caminhão ou motorista ainda possui uma operação em andamento. Finalize o retorno anterior.", 409);
+    await assertTeamIdle(db, job.driverId, job.truckId, job.id);
     await checkSlot(db, job.driverId, job.truckId, now, job.durationMinutes, job.id);
     await db.run("UPDATE jobs SET status='IN_PROGRESS',startedAt=?,version=version+1 WHERE id=?", now, job.id);
     await db.run("UPDATE rentals SET status='COLLECTING',version=version+1 WHERE id=?", rentalId);
@@ -270,7 +275,10 @@ async function regularizePickup(db: DB, u: User, p: Record<string, unknown>, now
     const driverId = v.str(p, "pickupDriverId", 1), truckId = v.str(p, "pickupTruckId", 1);
     const duration = v.integer(p, "durationMinutes", 15, 480, (await settings(db)).jobDurationMinutes);
     await checkResource(db, driverId, truckId, now);
-    let job = await row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind='PICKUP'", r.id);
+    const existingPickup = await row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind='PICKUP'", r.id);
+    await assertTeamIdle(db, driverId, truckId, existingPickup?.id ?? "");
+    await checkSlot(db, driverId, truckId, now, duration, existingPickup?.id ?? "");
+    let job = existingPickup;
     if (!job) {
         await db.run("INSERT INTO jobs(id,rentalId,kind,driverId,truckId,scheduledAt,durationMinutes,status,startedAt) VALUES(?,?,?,?,?,?,?,'RETURNING',NULL)", randomUUID(), r.id, "PICKUP", driverId, truckId, now, duration);
         job = await row<Job>(db, "SELECT * FROM jobs WHERE rentalId=? AND kind='PICKUP'", r.id);
@@ -479,10 +487,13 @@ async function dispatch(db: DB, u: User, action: string, p: Record<string, unkno
             assert(at <= now, "O recebimento não pode ter data futura.");
             if (!r.byMeasurement)
                 assert(await paid(db, r.id) + amount <= r.priceCents, "O valor supera o saldo da locação.", 409);
+            const note = v.str(p, "note", 0, 500);
+            if (r.byMeasurement)
+                assert(note.length >= 10, "Informe os motivos do valor diagnosticado, com pelo menos 10 caracteres: volume, tipo de resíduo, diárias extras ou o que formou o valor.");
             const id = randomUUID();
-            await db.run("INSERT INTO payments(id,rentalId,amountCents,method,paidAt,note,createdBy) VALUES(?,?,?,?,?,?,?)", id, r.id, amount, v.choice(p, "method", ["PIX", "CASH", "TRANSFER", "CARD"] as const), at, v.str(p, "note", 0, 500), u.id);
-            await event(db, u, r.id, "payment", "Recebimento manual registrado pela operação.", now);
-            return { id, message: "Recebimento registrado. Nenhuma cobrança bancária foi executada." };
+            await db.run("INSERT INTO payments(id,rentalId,amountCents,method,paidAt,note,createdBy) VALUES(?,?,?,?,?,?,?)", id, r.id, amount, v.choice(p, "method", ["PIX", "CASH", "TRANSFER", "CARD"] as const), at, note, u.id);
+            await event(db, u, r.id, "payment", r.byMeasurement ? `Valor diagnosticado de ${money(amount)}. Motivos: ${note}` : "Recebimento manual registrado pela operação.", now);
+            return { id, message: r.byMeasurement ? "Valor diagnosticado registrado com os motivos informados." : "Recebimento registrado. Nenhuma cobrança bancária foi executada." };
         }
         case "voidPayment": {
             const pmt = await find<Payment>(db, "payments", v.str(p, "id", 1));
@@ -586,10 +597,10 @@ export async function snapshot(db: DB, actor: User): Promise<Snapshot> {
         const rentalIds = rentals.map(r => r.id);
         const containerIds = new Set(rentals.map(r => r.containerId)), customerIds = new Set(rentals.map(r => r.customerId)), truckIds = new Set(jobs.map(j => j.truckId));
         const rentalSignatures = rentalIds.length
-            ? await rows<RentalSignature>(db, `SELECT * FROM rentalSignatures WHERE rentalId IN (${rentalIds.map(() => "?").join(",")}) ORDER BY signedAt`, ...rentalIds)
+            ? await rows<RentalSignature>(db, `SELECT id, rentalId, kind, role, signerName, '' AS image, signedAt, actorId FROM rentalSignatures WHERE rentalId IN (${rentalIds.map(() => "?").join(",")}) ORDER BY signedAt`, ...rentalIds)
             : [];
         const rentalSignatureRevisions = rentalIds.length
-            ? await rows<RentalSignatureRevision>(db, `SELECT * FROM rentalSignatureRevisions WHERE rentalId IN (${rentalIds.map(() => "?").join(",")}) ORDER BY replacedAt DESC`, ...rentalIds)
+            ? await rows<RentalSignatureRevision>(db, `SELECT id, rentalId, kind, role, signerName, '' AS image, signedAt, actorId, replacedAt, replacedBy, replaceReason FROM rentalSignatureRevisions WHERE rentalId IN (${rentalIds.map(() => "?").join(",")}) ORDER BY replacedAt DESC`, ...rentalIds)
             : [];
         return {
             user: u, settings: driver ? { ...(await settings(db)), defaultPriceCents: 0 } : (await settings(db)), serverTime: new Date().toISOString(),
@@ -605,6 +616,20 @@ export async function snapshot(db: DB, actor: User): Promise<Snapshot> {
             maintenance: driver ? [] : await rows<Maintenance>(db, "SELECT * FROM maintenance ORDER BY openedAt DESC"),
             users: u.role === "ADMIN" ? await rows<User>(db, `SELECT ${USER_COLUMNS} FROM users ORDER BY createdAt`) : [],
             audit: u.role === "ADMIN" ? await rows<Audit>(db, "SELECT a.*,u.name actorName FROM audit a JOIN users u ON a.actorId=u.id ORDER BY a.createdAt DESC LIMIT 200") : []
+        };
+    }, true);
+}
+
+export async function rentalSignaturesFor(db: DB, actor: User, rentalId: string): Promise<{ signatures: RentalSignature[]; revisions: RentalSignatureRevision[] }> {
+    return await tx(db, async () => {
+        const u = await row<User>(db, `SELECT ${USER_COLUMNS} FROM users WHERE id=? AND active=1`, actor.id);
+        assert(u, "Sessão expirada.", 401);
+        const rental = await find<Rental>(db, "rentals", rentalId);
+        if (u.role === "DRIVER")
+            assert(await row(db, "SELECT id FROM jobs WHERE rentalId=? AND driverId=?", rental.id, u.driverId), "Este serviço está atribuído a outro motorista.", 403);
+        return {
+            signatures: await rows<RentalSignature>(db, "SELECT * FROM rentalSignatures WHERE rentalId=? ORDER BY signedAt", rental.id),
+            revisions: await rows<RentalSignatureRevision>(db, "SELECT * FROM rentalSignatureRevisions WHERE rentalId=? ORDER BY replacedAt DESC", rental.id),
         };
     }, true);
 }

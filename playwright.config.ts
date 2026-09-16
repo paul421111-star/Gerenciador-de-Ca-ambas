@@ -8,8 +8,17 @@ export default defineConfig({
     use: { baseURL: 'http://localhost:3100', trace: 'retain-on-failure', screenshot: 'only-on-failure' },
     projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
     webServer: {
-        command: 'node --experimental-strip-types scripts/e2e-prepare.mjs && npm run dev -- --port 3100',
+        command: 'node --experimental-strip-types scripts/e2e-prepare.mjs && npx next dev --hostname 0.0.0.0 --port 3100',
         url: 'http://localhost:3100/login', reuseExistingServer: false, timeout: 180000,
-        env: { APP_URL: 'http://localhost:3100', DATABASE_PATH: './.test-data/e2e.sqlite', JR_ADMIN_EMAIL: 'e2e@example.test', JR_ADMIN_PASSWORD: password }
+        env: {
+            APP_URL: 'http://localhost:3100',
+            DATABASE_PATH: './.test-data/e2e.sqlite',
+            DATABASE_URL: '',
+            DATABASE_URL_DIRECT: '',
+            JR_FORCE_SQLITE: '1',
+            JR_ADMIN_EMAIL: 'e2e@example.test',
+            JR_ADMIN_PASSWORD: password,
+            NEXT_DIST_DIR: '.next-e2e'
+        }
     }
 });

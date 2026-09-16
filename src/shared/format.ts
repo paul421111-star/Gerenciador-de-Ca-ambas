@@ -6,6 +6,22 @@ export function isMeasured(rental: { byMeasurement?: number }): boolean {
 export function contractedLabel(rental: { byMeasurement?: number; priceCents: number }): string {
     return isMeasured(rental) ? 'Por medição' : money(rental.priceCents);
 }
+export function priceCaption(rental: { byMeasurement?: number }, full = false): string {
+    if (isMeasured(rental))
+        return 'Valor diagnosticado';
+    return full ? 'Valor contratado' : 'Contratado';
+}
+export function diagnosedLabel(rental: { byMeasurement?: number; priceCents: number }, paid: number): string {
+    if (!isMeasured(rental))
+        return money(rental.priceCents);
+    return paid > 0 ? money(paid) : 'Aguardando medição';
+}
+export function measurementReasons(payments: { note?: string | null; voidedAt?: string | null }[]): string[] {
+    return payments.filter(p => !p.voidedAt && (p.note ?? '').trim()).map(p => (p.note ?? '').trim());
+}
+export function measurementReasonsLabel(payments: { note?: string | null; voidedAt?: string | null }[]): string {
+    return measurementReasons(payments).join(' · ');
+}
 export function balanceLabel(rental: { byMeasurement?: number; priceCents: number; status?: string }, paid: number): string {
     if (rental.status === 'CANCELLED')
         return 'Cancelado';

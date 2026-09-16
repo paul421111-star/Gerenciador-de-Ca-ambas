@@ -26,7 +26,7 @@ export interface DB {
 }
 
 export const DEFAULT_SETTINGS: Settings = { companyName: 'JR Caçambas', companyPhone: '', yardAddress: '', defaultDays: 7, defaultPriceCents: 0, jobDurationMinutes: 60, demo: false, timezone: 'America/Sao_Paulo' };
-export const usesPostgres = () => Boolean(process.env.DATABASE_URL);
+export const usesPostgres = () => Boolean(process.env.DATABASE_URL?.trim()) && process.env.JR_FORCE_SQLITE !== '1';
 export const databasePath = () => resolve(process.env.DATABASE_PATH || './data/jr.sqlite');
 export const postgresUrl = () => process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL || '';
 

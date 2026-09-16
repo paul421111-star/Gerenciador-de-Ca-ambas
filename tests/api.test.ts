@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { openDatabase, row } from '../src/server/db.ts';
+import { openDatabase, row, usesPostgres } from '../src/server/db.ts';
 import { seed } from '../src/server/seed.ts';
 import { handleApi } from '../src/server/api.ts';
 const password = 'Private-test-admin-password!';
@@ -50,11 +50,60 @@ finally {
     f.db.close();
 } });
 test('API enforces idempotency and errors without exposing SQL or stack traces', async () => { const f = await fixture(); try {
-    const c = await f.login(), r = await f.req('/api/command', 'POST', { action: 'createCustomer', payload: {} }, c);
+    const c = await f.login(), r = await f.req('/api/command', 'POST', { action: 'createCustomer', payload: {} }, c, { 'x-request-id': 'req-test-1' });
     assert.equal(r.status, 400);
     const s = await r.json();
+    assert.equal(typeof s.error, 'string');
+    assert.equal(s.code, 'VALIDATION');
+    assert.equal(s.requestId, 'req-test-1');
+    assert.deepEqual(s.fieldErrors, {});
+    assert.equal(r.headers.get('x-request-id'), 'req-test-1');
     assert.equal('stack' in s, false);
     assert.equal('sql' in s, false);
+}
+finally {
+    f.db.close();
+} });
+test('JR_FORCE_SQLITE keeps sqlite even if DATABASE_URL is present', () => {
+    const previousUrl = process.env.DATABASE_URL, previousFlag = process.env.JR_FORCE_SQLITE;
+    process.env.DATABASE_URL = 'postgresql://example.invalid/postgres';
+    process.env.JR_FORCE_SQLITE = '1';
+    try {
+        assert.equal(usesPostgres(), false);
+    }
+    finally {
+        if (previousUrl === undefined)
+            delete process.env.DATABASE_URL;
+        else
+            process.env.DATABASE_URL = previousUrl;
+        if (previousFlag === undefined)
+            delete process.env.JR_FORCE_SQLITE;
+        else
+            process.env.JR_FORCE_SQLITE = previousFlag;
+    }
+});
+test('API health is live-only and ready probes the database', async () => { const f = await fixture(); try {
+    const health = await f.req('/api/health');
+    assert.equal(health.status, 200);
+    assert.equal((await health.json()).status, 'ok');
+    const ready = await f.req('/api/ready');
+    assert.equal(ready.status, 200);
+    assert.equal((await ready.json()).status, 'ready');
+}
+finally {
+    f.db.close();
+} });
+test('API snapshot omits signature images and serves them on demand', async () => { const f = await fixture(); try {
+    const c = await f.login();
+    const created = await f.req('/api/command', 'POST', { action: 'createCustomer', payload: { name: 'Assinatura Cliente', contact: 'Obra', phone: '11912345678' } }, c, { 'idempotency-key': randomUUID() });
+    assert.equal(created.status, 200);
+    const denied = await f.req('/api/rentals/not-a-valid-id/signatures');
+    assert.equal(denied.status, 401);
+    const missing = await f.req('/api/rentals/00000000-0000-4000-8000-000000000000/signatures', 'GET', undefined, c);
+    assert.equal(missing.status, 404);
+    const body = await missing.json();
+    assert.equal(body.code, 'NOT_FOUND');
+    assert.equal(typeof body.error, 'string');
 }
 finally {
     f.db.close();

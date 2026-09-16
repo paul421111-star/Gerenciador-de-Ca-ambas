@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { openDatabase, row, rows, settings, DEFAULT_SETTINGS } from '../src/server/db.ts';
-import { execute, snapshot, checkSlot } from '../src/server/service.ts';
+import { execute, snapshot, checkSlot, rentalSignaturesFor } from '../src/server/service.ts';
 import { seed } from '../src/server/seed.ts';
 import { hashPassword, verifyPassword, authenticate, sessionUser, sha256 } from '../src/server/auth.ts';
 import { AppError } from '../src/server/errors.ts';
@@ -334,6 +334,10 @@ test('virtual signatures persist on the rental and stay visible to the assigned 
     const driverSnap = await snapshot(f.db, f.user('user1'));
     assert.equal(driverSnap.rentalSignatures.length, 2);
     assert.equal(driverSnap.rentalSignatures[0].signerName, 'Responsável da obra');
+    assert.equal(driverSnap.rentalSignatures[0].image, '');
+    const full = await rentalSignaturesFor(f.db, f.user('user1'), id);
+    assert.match(full.signatures[0].image, /^data:image\/png/);
+    await rejects(() => rentalSignaturesFor(f.db, f.user('user2'), id), 403);
     await rejects(() => f.run('saveRentalSignatures', payload, 'user1'), 409);
     await rejects(() => f.run('saveRentalSignatures', { ...payload, responsibleName: 'Outro responsável' }, 'admin'));
     await f.run('saveRentalSignatures', { ...payload, responsibleName: 'Outro responsável', replaceReason: 'Correção do nome no local' }, 'admin');
@@ -396,16 +400,38 @@ test('quick pickup confirmation uses the same agenda conflict as a normal start'
 finally {
     f.close();
 } });
+test('regularizePickup blocks a team still returning from another job', async () => { const f = fixture(); try {
+    const first = await f.create({ pickupAt: '2026-09-18T14:00:00.000Z' });
+    await active(f, first);
+    await f.run('confirmPickup', { id: first, version: f.rental(first).version, confirmed: true }, 'admin', '2026-09-18T14:00:00.000Z');
+    assert.equal(f.rental(first).status, 'RETURNING');
+    const second = await f.create({ containerId: 'b2', openEndedPickup: true, deliveryDriverId: 'd2', pickupDriverId: 'd2', deliveryTruckId: 't2', pickupTruckId: 't2' });
+    await f.transition(second, 'start_delivery', DELIVERY);
+    await f.transition(second, 'complete_delivery', '2026-09-16T11:15:00.000Z');
+    await rejects(() => f.run('regularizePickup', { id: second, version: f.rental(second).version, pickupDriverId: 'd1', pickupTruckId: 't1', reason: 'Coleta já feita no cliente, sem saída lançada' }, 'admin', '2026-09-18T15:00:00.000Z'), 409);
+    await f.run('regularizePickup', { id: second, version: f.rental(second).version, pickupDriverId: 'd2', pickupTruckId: 't2', reason: 'Coleta já feita no cliente, sem saída lançada' }, 'admin', '2026-09-18T15:00:00.000Z');
+    assert.equal(f.rental(second).status, 'RETURNING');
+}
+finally {
+    f.close();
+} });
 test('measurement billing stores no contracted price and still accepts receipts', async () => { const f = fixture(); try {
     const id = await f.create({ byMeasurement: true, priceCents: 99999 });
     const rental = f.rental(id);
     assert.equal(rental.byMeasurement, 1);
     assert.equal(rental.priceCents, 0);
-    await f.run('addPayment', { rentalId: id, amountCents: 12345, method: 'PIX', paidAt: NOW, note: 'medicao' });
-    await f.run('addPayment', { rentalId: id, amountCents: 8000, method: 'CASH', paidAt: NOW, note: '' });
+    await rejects(() => f.run('addPayment', { rentalId: id, amountCents: 12345, method: 'PIX', paidAt: NOW, note: '' }));
+    await rejects(() => f.run('addPayment', { rentalId: id, amountCents: 12345, method: 'PIX', paidAt: NOW, note: 'curto' }));
+    await f.run('addPayment', { rentalId: id, amountCents: 12345, method: 'PIX', paidAt: NOW, note: 'Volume 8 m³ de entulho e duas diárias extras' });
+    await f.run('addPayment', { rentalId: id, amountCents: 8000, method: 'CASH', paidAt: NOW, note: 'Taxa de destinação no aterro' });
     assert.equal((await row<{
         n: number;
     }>(f.db, 'SELECT SUM(amountCents) n FROM payments'))!.n, 20345);
+    const ev = await row<{
+        description: string;
+    }>(f.db, "SELECT description FROM rentalEvents WHERE rentalId=? AND action='payment' AND description LIKE ?", id, '%Volume 8%');
+    assert.match(ev!.description, /Valor diagnosticado/);
+    assert.match(ev!.description, /Motivos: Volume 8 m³ de entulho e duas diárias extras/);
 }
 finally {
     f.close();

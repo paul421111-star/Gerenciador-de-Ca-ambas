@@ -1,11 +1,11 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useData } from './provider';
 import { Heading, Button, Notice, Badge } from './ui';
 import { SignaturePad, type SignaturePadHandle } from './signature-pad';
-import { dateTime, money, LABEL, contractedLabel, balanceLabel, pickupForecastLabel, customerPlaceLabel } from '../shared/format';
-import { received } from '../shared/reports';
+import { dateTime, money, LABEL, diagnosedLabel, priceCaption, balanceLabel, pickupForecastLabel, customerPlaceLabel, isMeasured } from '../shared/format';
+import { received, rentalMeasurementReasons } from '../shared/reports';
 import { requiresPickupSignature } from '../shared/rental-groups';
 import { signatureOf } from '../shared/signature';
 import type { RentalSignature } from '../shared/types';
@@ -72,6 +72,18 @@ export function PrintOrder({ id }: {
     const customer = r ? s.customers.find(x => x.id === r.customerId) : undefined;
     const requiredPickup = requiresPickupSignature(customer);
     const [includePickup, setIncludePickup] = useState(requiredPickup);
+    const [images, setImages] = useState<RentalSignature[]>([]);
+    useEffect(() => {
+        let cancelled = false;
+        void fetch(`/api/rentals/${id}/signatures`, { credentials: 'same-origin', cache: 'no-store' })
+            .then(res => res.ok ? res.json() : null)
+            .then((data: { signatures?: RentalSignature[] } | null) => {
+            if (!cancelled && data?.signatures)
+                setImages(data.signatures);
+        })
+            .catch(() => { });
+        return () => { cancelled = true; };
+    }, [id, s.rentalSignatures]);
     if (!r)
         return <Notice tone="warning">Ordem não encontrada ou não atribuída ao seu perfil.</Notice>;
     const bin = s.containers.find(x => x.id === r.containerId), jobs = s.jobs.filter(j => j.rentalId === id), isDriver = s.user.role === 'DRIVER';
@@ -79,10 +91,15 @@ export function PrintOrder({ id }: {
     const deliveryJob = jobs.find(j => j.kind === 'DELIVERY'), pickupJob = jobs.find(j => j.kind === 'PICKUP');
     const deliveryDriver = s.drivers.find(d => d.id === deliveryJob?.driverId)?.name ?? '';
     const pickupDriver = s.drivers.find(d => d.id === (pickupJob?.driverId ?? deliveryJob?.driverId))?.name ?? '';
-    const deliveryResponsible = signatureOf(s.rentalSignatures, id, 'DELIVERY', 'RESPONSIBLE');
-    const deliveryDriverSign = signatureOf(s.rentalSignatures, id, 'DELIVERY', 'DRIVER');
-    const pickupResponsible = signatureOf(s.rentalSignatures, id, 'PICKUP', 'RESPONSIBLE');
-    const pickupDriverSign = signatureOf(s.rentalSignatures, id, 'PICKUP', 'DRIVER');
+    const withImage = (meta?: RentalSignature) => {
+        if (!meta)
+            return undefined;
+        return images.find(item => item.id === meta.id) ?? images.find(item => item.kind === meta.kind && item.role === meta.role) ?? meta;
+    };
+    const deliveryResponsible = withImage(signatureOf(s.rentalSignatures, id, 'DELIVERY', 'RESPONSIBLE'));
+    const deliveryDriverSign = withImage(signatureOf(s.rentalSignatures, id, 'DELIVERY', 'DRIVER'));
+    const pickupResponsible = withImage(signatureOf(s.rentalSignatures, id, 'PICKUP', 'RESPONSIBLE'));
+    const pickupDriverSign = withImage(signatureOf(s.rentalSignatures, id, 'PICKUP', 'DRIVER'));
     const showPickup = requiredPickup || includePickup || Boolean(pickupResponsible && pickupDriverSign);
     const canSave = r.status !== 'CANCELLED';
     const canRedo = canSave && !isDriver;
@@ -105,7 +122,7 @@ export function PrintOrder({ id }: {
         <section className="print-section"><h2>Contratante e local do serviço</h2><dl className="detail-grid"><div><dt>Cliente</dt><dd>{customerPlaceLabel(customer, site)}</dd></div><div><dt>Contato do contratante</dt><dd>{customer?.contact} · {customer?.phone}</dd></div><div className="full"><dt>Local de entrega e retirada</dt><dd>{r.address}<br />{[r.neighborhood, r.city, r.postalCode].filter(Boolean).join(' · ')}</dd></div><div><dt>Responsável no local</dt><dd>{r.siteContact} · {r.sitePhone}</dd></div><div><dt>Equipamento / resíduo informado</dt><dd>{bin?.code} · {bin?.capacityM3 ?? '?'} m³ · {r.wasteType}</dd></div></dl></section>
         <section className="print-section"><h2>Planejamento e execução</h2><table><thead><tr><th>Etapa</th><th>Previsão</th><th>Efetiva</th></tr></thead><tbody><tr><td>Entrega</td><td>{dateTime(r.deliveryAt)}</td><td>{dateTime(r.deliveredAt)}</td></tr><tr><td>Coleta</td><td>{pickupForecastLabel(r)}</td><td>{dateTime(r.pickedUpAt)}</td></tr><tr><td>Retorno ao pátio</td><td>Conferência operacional</td><td>{dateTime(r.returnedAt)}</td></tr></tbody></table>
             <table><thead><tr><th>Serviço</th><th>Motorista responsável</th><th>Caminhão / placa</th></tr></thead><tbody>{jobs.map(j => <tr key={j.id}><td>{LABEL[j.kind]}</td><td>{s.drivers.find(d => d.id === j.driverId)?.name || 'Outro responsável'}</td><td>{s.trucks.find(t => t.id === j.truckId)?.code || 'Outro veículo'} · {s.trucks.find(t => t.id === j.truckId)?.plate || '—'}</td></tr>)}</tbody></table></section>
-        {!isDriver && <section className="print-section"><h2>Valores registrados</h2><dl className="detail-grid"><div><dt>Valor contratado</dt><dd>{contractedLabel(r)}</dd></div><div><dt>Recebido / saldo</dt><dd>{money(received(s, id))} / {balanceLabel(r, received(s, id))}</dd></div></dl></section>}
+        {!isDriver && <section className="print-section"><h2>Valores registrados</h2><dl className="detail-grid"><div><dt>{priceCaption(r, true)}</dt><dd>{diagnosedLabel(r, received(s, id))}</dd></div><div><dt>Recebido / saldo</dt><dd>{money(received(s, id))} / {balanceLabel(r, received(s, id))}</dd></div>{isMeasured(r) && <div className="full"><dt>Motivos do valor diagnosticado</dt><dd className="pre-wrap">{rentalMeasurementReasons(s, id) || 'Ainda não informado.'}</dd></div>}</dl></section>}
         {r.notes && <section className="print-section"><h2>Observações</h2><p className="pre-wrap">{r.notes}</p></section>}
         <SignatureBlock title="Conferência da entrega" kind="DELIVERY" responsibleLabel="Nome e assinatura do responsável" driverLabel="Nome e assinatura do motorista" defaultResponsible={r.siteContact} defaultDriver={deliveryDriver} responsible={deliveryResponsible} driver={deliveryDriverSign} canSave={canSave} canRedo={canRedo} busy={busy} notify={notify} onSave={persist}/>
         {showPickup && <SignatureBlock title="Conferência da retirada / troca" note={requiredPickup ? 'Obrigatório neste contratante: o motorista e o responsável pela troca ou retirada da caçamba assinam no local.' : 'Preencha se houver troca ou retirada neste atendimento.'} kind="PICKUP" responsibleLabel="Nome e assinatura do responsável pela troca ou retirada" driverLabel="Nome e assinatura do motorista da retirada" defaultResponsible={r.siteContact} defaultDriver={pickupDriver} responsible={pickupResponsible} driver={pickupDriverSign} canSave={canSave} canRedo={canRedo} busy={busy} notify={notify} onSave={persist}/>}

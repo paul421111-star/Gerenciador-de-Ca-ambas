@@ -1,4 +1,4 @@
-import { AppError, assert } from './errors.ts';
+import { AppError, assert, errorCode } from './errors.ts';
 import { SESSION_COOKIE, SESSION_SECONDS } from './auth.ts';
 export function expectedOrigin(request: Request): string {
     const configured = process.env.APP_URL;
@@ -49,10 +49,27 @@ export function sessionCookie(token: string, clear = false): string {
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
     return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store, max-age=0', 'X-Content-Type-Options': 'nosniff', ...headers } });
 }
-export function errorResponse(error: unknown): Response {
-    if (error instanceof AppError)
-        return json({ error: error.message }, error.status, error.status === 429 ? { 'Retry-After': '900' } : {});
+export function errorResponse(error: unknown, requestId = ''): Response {
+    const id = requestId || (error instanceof AppError ? error.requestId : '') || '';
+    const headers: Record<string, string> = {};
+    if (id)
+        headers['X-Request-Id'] = id;
+    if (error instanceof AppError) {
+        if (error.status === 429)
+            headers['Retry-After'] = '900';
+        return json({
+            error: error.message,
+            code: error.code,
+            requestId: id || undefined,
+            fieldErrors: {}
+        }, error.status, headers);
+    }
     // Only emit a generic error to clients; never expose SQL, credentials or filesystem paths.
-    console.error('[JR API]', error instanceof Error ? error.name : 'UnexpectedError');
-    return json({ error: 'Falha interna. Atualize a tela. Se persistir, consulte o administrador.' }, 500);
+    console.error('[JR API]', error instanceof Error ? error.name : 'UnexpectedError', id);
+    return json({
+        error: 'Falha interna. Atualize a tela. Se persistir, consulte o administrador.',
+        code: errorCode(500),
+        requestId: id || undefined,
+        fieldErrors: {}
+    }, 500, headers);
 }

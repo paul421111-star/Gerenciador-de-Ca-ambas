@@ -1,6 +1,39 @@
 export class AppError extends Error {
     readonly status: number;
-    constructor(message: string, status = 400) { super(message); this.name = 'AppError'; this.status = status; }
+    readonly code: string;
+    requestId?: string;
+    constructor(message: string, status = 400, code?: string) {
+        super(message);
+        this.name = 'AppError';
+        this.status = status;
+        this.code = code ?? errorCode(status);
+    }
+}
+
+export function errorCode(status: number): string {
+    if (status === 401)
+        return 'UNAUTHENTICATED';
+    if (status === 403)
+        return 'FORBIDDEN';
+    if (status === 404)
+        return 'NOT_FOUND';
+    if (status === 409)
+        return 'CONFLICT';
+    if (status === 413)
+        return 'PAYLOAD_TOO_LARGE';
+    if (status === 415)
+        return 'UNSUPPORTED_MEDIA';
+    if (status === 422)
+        return 'UNPROCESSABLE';
+    if (status === 405)
+        return 'METHOD_NOT_ALLOWED';
+    if (status === 429)
+        return 'RATE_LIMITED';
+    if (status === 503)
+        return 'UNAVAILABLE';
+    if (status >= 500)
+        return 'INTERNAL';
+    return 'VALIDATION';
 }
 export function assert(condition: unknown, message: string, status = 400): asserts condition {
     if (!condition)
