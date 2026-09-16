@@ -58,7 +58,7 @@ test('lookupCep uses BrasilAPI and falls back to ViaCEP', async () => {
 });
 test('API cep route requires a session and validates the postal code', async () => {
     const db = openDatabase(':memory:');
-    seed(db, { email: 'admin@test.local', password });
+    await seed(db, { email: 'admin@test.local', password });
     const req = (path: string, cookie?: string) => handleApi(new Request('http://localhost:3000' + path, { headers: { origin: 'http://localhost:3000', ...(cookie ? { cookie } : {}) } }), db);
     try {
         assert.equal((await req('/api/cep/06786050')).status, 401);

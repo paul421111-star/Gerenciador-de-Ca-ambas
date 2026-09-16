@@ -4,47 +4,38 @@ import { useSearchParams } from 'next/navigation';
 import { useData } from './provider';
 import { Badge, Button, Card, Empty, Heading, Notice, Pagination, Search, Stat } from './ui';
 import { Icon } from './icons';
-import { rentalForm, containerForm, inventoryForm, maintenanceForm, scheduleForm } from './forms';
-import { dateTime, dateKey, fromLocalInput, time, isOpen, isOpenEndedPickup, LABEL, customerPlaceLabel } from '../shared/format';
+import { rentalForm, containerForm, inventoryForm, maintenanceForm, scheduleForm, pickupConfirmForm } from './forms';
+import { dateTime, dateKey, fromLocalInput, time, isOpen, pickupForecastLabel, pickupOverdue, LABEL, customerPlaceLabel } from '../shared/format';
 import { downloadCsv, rentalRows } from '../shared/reports';
 import type { Run } from './provider';
 import type { Rental, Snapshot } from '../shared/types';
-function pickupOverdue(r: Rental): boolean {
-    return ['ACTIVE', 'COLLECTING'].includes(r.status) && !isOpenEndedPickup(r) && Date.parse(r.pickupAt) < Date.now();
-}
-function PickupCell({ s, rental: r, run, notify }: {
+function PickupCell({ s, rental: r, run, openForm }: {
     s: Snapshot;
     rental: Rental;
     run: Run;
-    notify: (text: string) => void;
+    openForm: (config: ReturnType<typeof pickupConfirmForm>) => void;
 }) {
     const collected = Boolean(r.pickedUpAt);
-    const pickup = s.jobs.find(j => j.rentalId === r.id && j.kind === 'PICKUP'), delivery = s.jobs.find(j => j.rentalId === r.id && j.kind === 'DELIVERY');
-    const assigned = pickup?.driverId ?? delivery?.driverId;
+    const pickup = s.jobs.find(j => j.rentalId === r.id && j.kind === 'PICKUP');
+    const assigned = pickup?.driverId;
     const allowed = s.user.role !== 'DRIVER' || Boolean(assigned && assigned === s.user.driverId);
     const canConfirm = collected === false && allowed && ['ACTIVE', 'COLLECTING'].includes(r.status);
-    async function mark(on: boolean) {
-        if (!on || !canConfirm)
-            return;
-        try {
-            await run('confirmPickup', { id: r.id, version: r.version });
-        }
-        catch (e) {
-            notify(e instanceof Error ? e.message : 'Não foi possível registrar a retirada.');
-        }
-    }
-    return <div className="pickup-cell"><label className="check-label pickup-check"><input type="checkbox" checked={collected} disabled={!canConfirm} onChange={e => void mark(e.target.checked)}/>Ret.</label>
-        {collected ? <>{dateTime(r.pickedUpAt)}<small>Horário da retirada</small></> : canConfirm ? <small className="muted">Marque ao retirar</small> : <small className="muted">{['RESERVED', 'DELIVERING'].includes(r.status) ? 'Aguardando entrega' : pickupOverdue(r) ? <span className="text-danger">Prazo vencido</span> : '—'}</small>}</div>;
+    return <div className="pickup-cell">
+        <span className="pickup-meta"><small>Previsão</small><strong>{pickupForecastLabel(r)}</strong></span>
+        {pickupOverdue(r) && <span className="text-danger">Atrasada</span>}
+        <span className="pickup-meta"><small>Coleta</small><strong>{collected ? dateTime(r.pickedUpAt) : 'Não realizada'}</strong></span>
+        {canConfirm && <Button small variant="primary" onClick={() => openForm(pickupConfirmForm(s, run, r))}>Confirmar retirada</Button>}
+    </div>;
 }
 export function Rentals() {
-    const { data: s, openForm, run, openDetail, notify } = useData();
+    const { data: s, openForm, run, openDetail } = useData();
     const params = useSearchParams();
     const [query, setQuery] = useState(params.get('busca') ?? ''), [status, setStatus] = useState('OPEN'), [page, setPage] = useState(1);
     const q = query.toLocaleLowerCase('pt-BR'), list = s.rentals.filter(r => { const bin = s.containers.find(c => c.id === r.containerId), customer = s.customers.find(c => c.id === r.customerId), site = s.customerSites.find(item => item.id === r.siteId); return (status === 'ALL' || (status === 'OPEN' ? isOpen(r.status) : status === 'OVERDUE' ? pickupOverdue(r) : r.status === status)) && `${r.code} ${bin?.code} ${customer?.name} ${site?.name} ${r.address} ${r.neighborhood} ${r.city} ${r.siteContact}`.toLocaleLowerCase('pt-BR').includes(q); });
     const currentPage = Math.min(page, Math.max(1, Math.ceil(list.length / 15)));
     return <div className="screen enter"><Heading title="Locações" description="Da reserva à conferência do retorno: acompanhe o ciclo completo de cada caçamba."><Button icon="download" onClick={() => downloadCsv('locacoes-jr.csv', rentalRows(s, list))}>Exportar</Button><Button variant="primary" icon="plus" onClick={() => openForm(rentalForm(s, run))}>Nova locação</Button></Heading>
  <Card><div className="toolbar"><Search value={query} onChange={v => { setQuery(v); setPage(1); }} placeholder="Buscar caçamba, cliente ou endereço..."/><select aria-label="Situação da locação" value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}><option value="OPEN">Em aberto</option><option value="ALL">Todas as locações</option><option value="OVERDUE">Retirada atrasada</option>{['RESERVED', 'DELIVERING', 'ACTIVE', 'COLLECTING', 'RETURNING', 'COMPLETED', 'CANCELLED'].map(v => <option key={v} value={v}>{LABEL[v]}</option>)}</select><span className="muted">{list.length} registro(s)</span></div>
- {list.length ? <><div className="table-scroll"><table><thead><tr><th>Locação / caçamba</th><th>Cliente / local</th><th>Entrega prevista</th><th>Retirada</th><th>Situação</th><th /></tr></thead><tbody>{list.slice((currentPage - 1) * 15, currentPage * 15).map(r => <tr key={r.id}><td><button className="text-button strong" onClick={() => openDetail(r.id)}>{r.code}</button><small>{s.containers.find(c => c.id === r.containerId)?.code}</small></td><td><strong>{customerPlaceLabel(s.customers.find(c => c.id === r.customerId), s.customerSites.find(item => item.id === r.siteId))}</strong><small className="truncate" title={`${r.address}, ${r.city}`}>{r.address} · {r.neighborhood}</small></td><td>{dateTime(r.deliveryAt)}<small>{r.deliveredAt ? 'Entregue: ' + dateTime(r.deliveredAt) : 'Aguardando confirmação'}</small></td><td><PickupCell s={s} rental={r} run={run} notify={notify}/></td><td><Badge status={r.status}/>{s.rentalSignatures.some(item => item.rentalId === r.id && item.kind === 'DELIVERY') && <small>Entrega assinada</small>}{s.rentalSignatures.some(item => item.rentalId === r.id && item.kind === 'PICKUP') && <small>Retirada assinada</small>}</td><td><Button small icon="eye" onClick={() => openDetail(r.id)}>Detalhes</Button></td></tr>)}</tbody></table></div><Pagination page={currentPage} count={list.length} onPage={setPage}/></> : <Empty title="Nenhuma locação nesta seleção" description="Confira os filtros ou cadastre uma nova locação."/>}</Card>
+ {list.length ? <><div className="table-scroll"><table><thead><tr><th>Locação / caçamba</th><th>Cliente / local</th><th>Entrega prevista</th><th>Retirada</th><th>Situação</th><th /></tr></thead><tbody>{list.slice((currentPage - 1) * 15, currentPage * 15).map(r => <tr key={r.id}><td><button className="text-button strong" onClick={() => openDetail(r.id)}>{r.code}</button><small>{s.containers.find(c => c.id === r.containerId)?.code}</small></td><td><strong>{customerPlaceLabel(s.customers.find(c => c.id === r.customerId), s.customerSites.find(item => item.id === r.siteId))}</strong><small className="truncate" title={`${r.address}, ${r.city}`}>{r.address} · {r.neighborhood}</small></td><td>{dateTime(r.deliveryAt)}<small>{r.deliveredAt ? 'Entregue: ' + dateTime(r.deliveredAt) : 'Aguardando confirmação'}</small></td><td><PickupCell s={s} rental={r} run={run} openForm={openForm}/></td><td><Badge status={r.status}/>{s.rentalSignatures.some(item => item.rentalId === r.id && item.kind === 'DELIVERY') && <small>Entrega assinada</small>}{s.rentalSignatures.some(item => item.rentalId === r.id && item.kind === 'PICKUP') && <small>Retirada assinada</small>}</td><td><Button small icon="eye" onClick={() => openDetail(r.id)}>Detalhes</Button></td></tr>)}</tbody></table></div><Pagination page={currentPage} count={list.length} onPage={setPage}/></> : <Empty title="Nenhuma locação nesta seleção" description="Confira os filtros ou cadastre uma nova locação."/>}</Card>
  {s.user.role === 'ADMIN' && s.containers.some(c => c.status === 'INVENTORY') && <Notice><strong>Começando com caçambas já locadas?</strong> Use a abertura de operação para registrar a entrega anterior e programar a retirada. <Button small onClick={() => openForm(rentalForm(s, run, true))}>Registrar locação existente</Button></Notice>}</div>;
 }
 export function Containers() {

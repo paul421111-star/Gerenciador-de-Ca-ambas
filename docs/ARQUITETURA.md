@@ -64,7 +64,7 @@ O mapa é uma visualização Web Mercator de tiles externos, sem SDK comercial e
 
 ## Evolução e limites técnicos
 
-SQLite foi escolhido para entregar frontend, API e persistência sem conta de banco externo. Opera em arquivo local, com WAL, chaves estrangeiras, timeout de bloqueio e transações. Use uma instância de aplicação, disco persistente e backup externo.
+SQLite permanece o banco de testes, demonstração e operação local sem conta externa. Quando `DATABASE_URL` está definida, a mesma API e as mesmas regras usam Postgres no Supabase (Transaction Pooler, prepared statements desligados). A tela não fala com o Supabase; autenticação continua nas tabelas `users` / `sessions`.
 
 A listagem atual retorna um snapshot; paginação de algumas telas é client-side. O histórico crescerá e pode exigir paginação no servidor, retenção de logs e migração para PostgreSQL quando houver maior escala. Não foi feito teste de carga ou dimensionamento de produção.
 

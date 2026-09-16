@@ -4,12 +4,12 @@ import { useData } from './provider';
 import { Stat, Card, Badge, Button, Empty, Notice } from './ui';
 import { Icon } from './icons';
 import { rentalForm } from './forms';
-import { dateKey, time, dateTime, isOpen, isOpenEndedPickup } from '../shared/format';
+import { dateKey, time, dateTime, isOpen, pickupOverdue } from '../shared/format';
 export function Dashboard() {
     const { data: s, run, openForm, openDetail } = useData();
-    const today = dateKey(), now = Date.now(), driver = s.user.role === 'DRIVER';
+    const today = dateKey(), driver = s.user.role === 'DRIVER';
     const inventory = s.containers.filter(c => c.status === 'INVENTORY').length, available = s.containers.filter(c => c.status === 'AVAILABLE').length, onSite = s.containers.filter(c => c.status === 'ON_SITE').length;
-    const overdue = s.rentals.filter(r => ['ACTIVE', 'COLLECTING'].includes(r.status) && !isOpenEndedPickup(r) && Date.parse(r.pickupAt) < now), daily = s.jobs.filter(j => dateKey(j.scheduledAt) === today && j.status !== 'CANCELLED'), upcoming = s.jobs.filter(j => !['DONE', 'CANCELLED'].includes(j.status)).slice(0, 4);
+    const overdue = s.rentals.filter(r => pickupOverdue(r)), daily = s.jobs.filter(j => dateKey(j.scheduledAt) === today && j.status !== 'CANCELLED'), upcoming = s.jobs.filter(j => !['DONE', 'CANCELLED'].includes(j.status)).slice(0, 4);
     const portions = [{ label: 'No cliente', value: onSite, color: '#d9a820' }, { label: 'Disponíveis', value: available, color: '#3d7b60' }, { label: 'Reservadas', value: s.containers.filter(c => c.status === 'RESERVED').length, color: '#7593ad' }, { label: 'Em trânsito', value: s.containers.filter(c => ['IN_TRANSIT', 'RETURNING'].includes(c.status)).length, color: '#a18ab8' }, { label: 'Manutenção', value: s.containers.filter(c => c.status === 'MAINTENANCE').length, color: '#c2836d' }, { label: 'A conferir / inativas', value: s.containers.filter(c => ['INVENTORY', 'RETIRED'].includes(c.status)).length, color: '#d9ddd2' }];
     let acc = 0;
     const total = s.containers.length || 1, gradient = portions.map(p => { const start = acc; acc += p.value / total * 100; return `${p.color} ${start}% ${acc}%`; }).join(',');

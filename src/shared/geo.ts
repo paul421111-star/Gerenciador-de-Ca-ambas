@@ -1,6 +1,13 @@
+export type LocationPrecision = 'CONFIRMED' | 'APPROXIMATE' | 'PENDING';
 export interface GeoPoint {
     lat: number;
     lon: number;
+}
+export interface LocatedPoint {
+    lat: number | null;
+    lon: number | null;
+    precision: LocationPrecision;
+    source?: 'coordinates' | 'geocode' | 'city_center';
 }
 export interface AreaSite {
     address: string;
@@ -84,10 +91,12 @@ export function readCoordinates(value: Record<string, unknown>): GeoPoint | null
     const lon = value.longitude == null || value.longitude === '' ? NaN : Number(value.longitude);
     return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
 }
-export async function resolveCoordinates(value: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<GeoPoint | null> {
+export async function resolveLocation(value: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<LocatedPoint> {
     const current = readCoordinates(value);
-    if (current)
-        return current;
+    if (current) {
+        const marked = value.locationPrecision;
+        return { ...current, precision: marked === 'APPROXIMATE' ? 'APPROXIMATE' : 'CONFIRMED', source: 'coordinates' };
+    }
     const found = await geocodeAddress(addressQuery({
         address: String(value.address ?? ''),
         neighborhood: String(value.neighborhood ?? ''),
@@ -95,8 +104,12 @@ export async function resolveCoordinates(value: Record<string, unknown>, fetchIm
         postalCode: String(value.postalCode ?? '')
     }), fetchImpl);
     if (found)
-        return found;
-    return inferCityCenter(String(value.city ?? ''));
+        return { ...found, precision: 'APPROXIMATE', source: 'geocode' };
+    return { lat: null, lon: null, precision: 'PENDING' };
+}
+export async function resolveCoordinates(value: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<GeoPoint | null> {
+    const located = await resolveLocation(value, fetchImpl);
+    return located.lat == null || located.lon == null ? null : { lat: located.lat, lon: located.lon };
 }
 export function fitBounds(points: GeoPoint[], size: { w: number; h: number }, padding = 80): { center: GeoPoint; zoom: number } {
     if (!points.length)

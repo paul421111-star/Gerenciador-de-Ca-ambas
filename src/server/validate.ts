@@ -52,6 +52,17 @@ export function coordinates(p: Record<string, unknown>): {
     assert((a === null) === (b === null), 'Informe latitude e longitude juntas ou deixe ambas vazias.');
     return a === null ? { latitude: null, longitude: null } : { latitude: num(p, 'latitude', -90, 90), longitude: num(p, 'longitude', -180, 180) };
 }
+export function locationPrecision(p: Record<string, unknown>, coords: {
+    latitude: number | null;
+    longitude: number | null;
+}): 'CONFIRMED' | 'APPROXIMATE' | 'PENDING' {
+    const raw = p.locationPrecision;
+    if (coords.latitude == null)
+        return 'PENDING';
+    if (raw === 'APPROXIMATE' || raw === 'CONFIRMED')
+        return raw;
+    return 'CONFIRMED';
+}
 /** Passwords are opaque: never trim or normalize a user's secret. */
 export function secret(p: Record<string, unknown>, key: string, min = 12, max = 128): string {
     const value = p[key];

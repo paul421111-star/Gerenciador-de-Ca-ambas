@@ -116,6 +116,7 @@ export function applyCepResult(values: Record<string, unknown>, fields: { name: 
     if (names.has('latitude') && names.has('longitude') && address.latitude != null && address.longitude != null) {
         next.latitude = address.latitude;
         next.longitude = address.longitude;
+        next.locationPrecision = 'APPROXIMATE';
     }
     return next;
 }

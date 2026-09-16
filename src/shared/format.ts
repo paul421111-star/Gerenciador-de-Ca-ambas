@@ -11,9 +11,16 @@ export function balanceLabel(rental: { byMeasurement?: number; priceCents: numbe
         return 'Cancelado';
     return isMeasured(rental) ? 'Por medição' : money(rental.priceCents - paid);
 }
-export function isOpenEndedPickup(rental: { openEndedPickup?: number }): boolean {
-    return rental.openEndedPickup === 1;
+export function isOpenEndedPickup(rental: { openEndedPickup?: number; pickupAt?: string | null }): boolean {
+    return rental.openEndedPickup === 1 && !rental.pickupAt;
 }
+export function pickupForecastLabel(rental: { openEndedPickup?: number; pickupAt?: string | null }): string {
+    return isOpenEndedPickup(rental) ? 'Sob solicitação' : dateTime(rental.pickupAt);
+}
+export function pickupOverdue(rental: { status: string; openEndedPickup?: number; pickupAt?: string | null; pickedUpAt?: string | null }): boolean {
+    return ['ACTIVE', 'COLLECTING'].includes(rental.status) && !rental.pickedUpAt && !isOpenEndedPickup(rental) && Boolean(rental.pickupAt) && Date.parse(rental.pickupAt!) < Date.now();
+}
+export const PRECISION_LABEL = { CONFIRMED: 'Posição confirmada', APPROXIMATE: 'Posição aproximada', PENDING: 'Posição pendente' } as const;
 export function sortSites<T extends { name: string }>(sites: T[]): T[] {
     return [...sites].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true }));
 }
@@ -66,5 +73,5 @@ export const isOpen = (status: string) => !['COMPLETED', 'CANCELLED'].includes(s
 export function cents(value: string): number { const v = value.trim().replace(',', '.'); if (!/^\d+(\.\d{1,2})?$/.test(v))
     throw new Error('Informe um valor positivo com até duas casas decimais.'); return Math.round(Number(v) * 100); }
 export const ROLE_LABEL = { ADMIN: 'Administrador', DISPATCHER: 'Operação', DRIVER: 'Motorista' } as const;
-export const LABEL: Record<string, string> = { INVENTORY: 'A conferir', AVAILABLE: 'Disponível', RESERVED: 'Reservada', IN_TRANSIT: 'Em entrega', ON_SITE: 'No cliente', RETURNING: 'Retornando', MAINTENANCE: 'Manutenção', RETIRED: 'Inativa', DELIVERING: 'Em entrega', ACTIVE: 'No cliente', COLLECTING: 'Em retirada', COMPLETED: 'Concluída', CANCELLED: 'Cancelada', SCHEDULED: 'Agendado', IN_PROGRESS: 'Em andamento', DONE: 'Concluído', DELIVERY: 'Entrega', PICKUP: 'Retirada', PIX: 'Pix', CASH: 'Dinheiro', TRANSFER: 'Transferência', CARD: 'Cartão' };
+export const LABEL: Record<string, string> = { INVENTORY: 'A conferir', AVAILABLE: 'Disponível', RESERVED: 'Reservada', IN_TRANSIT: 'Em entrega', ON_SITE: 'No cliente', RETURNING: 'Retornando', MAINTENANCE: 'Manutenção', RETIRED: 'Inativa', DELIVERING: 'Em entrega', ACTIVE: 'No cliente', COLLECTING: 'Em retirada', COMPLETED: 'Concluída', CANCELLED: 'Cancelada', SCHEDULED: 'Agendado', IN_PROGRESS: 'Em andamento', DONE: 'Concluído', DELIVERY: 'Entrega', PICKUP: 'Retirada', PIX: 'Pix', CASH: 'Dinheiro', TRANSFER: 'Transferência', CARD: 'Cartão', CONFIRMED: 'Posição confirmada', APPROXIMATE: 'Posição aproximada', PENDING: 'Posição pendente' };
 export const TONE: Record<string, string> = { INVENTORY: 'neutral', AVAILABLE: 'green', RESERVED: 'amber', IN_TRANSIT: 'blue', ON_SITE: 'green', RETURNING: 'purple', MAINTENANCE: 'red', RETIRED: 'neutral', DELIVERING: 'blue', ACTIVE: 'green', COLLECTING: 'amber', COMPLETED: 'neutral', CANCELLED: 'red', SCHEDULED: 'amber', IN_PROGRESS: 'blue', DONE: 'green' };

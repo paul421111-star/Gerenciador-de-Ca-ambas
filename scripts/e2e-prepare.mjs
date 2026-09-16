@@ -4,5 +4,5 @@ import {openDatabase} from '../src/server/db.ts';import {seed} from '../src/serv
 const dir=resolve('.test-data');mkdirSync(dir,{recursive:true});
 for(const suffix of ['','-wal','-shm'])rmSync(resolve(dir,'e2e.sqlite'+suffix),{force:true});
 const password=process.env.JR_ADMIN_PASSWORD;if(!password)throw new Error('JR_ADMIN_PASSWORD is required for isolated E2E setup.');
-const db=openDatabase(resolve(dir,'e2e.sqlite'));try{seed(db,{email:'e2e@example.test',password,name:'Teste E2E'});}finally{db.close();}
+const db=openDatabase(resolve(dir,'e2e.sqlite'));try{await seed(db,{email:'e2e@example.test',password,name:'Teste E2E'});}finally{db.close();}
 console.log('Isolated E2E database ready.');

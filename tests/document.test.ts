@@ -53,7 +53,7 @@ test('lookupCnpj uses BrasilAPI and falls back to ReceitaWS', async () => {
 });
 test('API cnpj route requires a session and validates the company document', async () => {
     const db = openDatabase(':memory:');
-    seed(db, { email: 'admin@test.local', password });
+    await seed(db, { email: 'admin@test.local', password });
     const req = (path: string, cookie?: string) => handleApi(new Request('http://localhost:3000' + path, { headers: { origin: 'http://localhost:3000', ...(cookie ? { cookie } : {}) } }), db);
     try {
         assert.equal((await req('/api/cnpj/' + BB)).status, 401);

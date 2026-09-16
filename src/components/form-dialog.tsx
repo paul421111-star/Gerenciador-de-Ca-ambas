@@ -66,7 +66,7 @@ export function FormDialog({ config, onClose }: {
         setError('Localização indisponível neste navegador.');
         setGpsBusy(false);
         return;
-    } navigator.geolocation.getCurrentPosition(p => { setValues(v => ({ ...v, latitude: Number(p.coords.latitude.toFixed(6)), longitude: Number(p.coords.longitude.toFixed(6)) })); setGpsBusy(false); }, () => { setError('Não foi possível obter a localização. Confira a permissão e o uso de HTTPS.'); setGpsBusy(false); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }); }
+    } navigator.geolocation.getCurrentPosition(p => { setValues(v => ({ ...v, latitude: Number(p.coords.latitude.toFixed(6)), longitude: Number(p.coords.longitude.toFixed(6)), locationPrecision: 'CONFIRMED' })); setGpsBusy(false); }, () => { setError('Não foi possível obter a localização. Confira a permissão e o uso de HTTPS.'); setGpsBusy(false); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }); }
     async function fillFromCep(value: string) {
         if (!isCompleteCep(value))
             return;

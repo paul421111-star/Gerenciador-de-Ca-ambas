@@ -19,23 +19,23 @@ export async function handleApi(request: Request, providedDB?: DB): Promise<Resp
         // Reject cross-origin mutations before reading data or creating a database connection.
         if (request.method === 'POST')
             sameOrigin(request);
-        const db = providedDB ?? database();
+        const db = providedDB ?? await database();
         if (path === '/api/login' && request.method === 'POST') {
-            assert(row<{
-                n: number;
-            }>(db, 'SELECT COUNT(*) n FROM users')!.n > 0, 'Sistema não inicializado. Execute npm run setup no servidor.', 503);
+            assert(Number((await row<{
+                n: number | string;
+            }>(db, 'SELECT COUNT(*) AS n FROM users'))?.n ?? 0) > 0, 'Sistema não inicializado. Execute npm run setup no servidor.', 503);
             const p = object(await readJson(request, 4096));
-            const result = authenticate(db, email(p, 'email', true), secret(p, 'password', 1, 128));
+            const result = await authenticate(db, email(p, 'email', true), secret(p, 'password', 1, 128));
             return json({ user: result.user }, 200, { 'Set-Cookie': sessionCookie(result.token) });
         }
-        const token = cookieToken(request), user = sessionUser(db, token);
+        const token = cookieToken(request), user = await sessionUser(db, token);
         assert(user, 'Sua sessão expirou. Entre novamente.', 401);
         if (path === '/api/logout' && request.method === 'POST') {
-            revokeSession(db, token);
+            await revokeSession(db, token);
             return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie('', true) });
         }
         if (path === '/api/snapshot' && request.method === 'GET')
-            return json(snapshot(db, user));
+            return json(await snapshot(db, user));
         if (request.method === 'GET' && (path === '/api/cep' || path.startsWith('/api/cep/'))) {
             const cep = path.startsWith('/api/cep/') ? path.slice('/api/cep/'.length) : url.searchParams.get('cep') ?? '';
             return json(await lookupCep(cep));
@@ -52,7 +52,7 @@ export async function handleApi(request: Request, providedDB?: DB): Promise<Resp
             const body = await readJson(request, 200000) as { action?: string; payload?: Record<string, unknown> };
             if ((body.action === 'createRental' || body.action === 'importActiveRental') && body.payload)
                 body.payload = await geocodePayload(body.payload);
-            const result = execute(db, user, body, request.headers.get('idempotency-key') ?? '');
+            const result = await execute(db, user, body, request.headers.get('idempotency-key') ?? '');
             return json(result);
         }
         throw new AppError('Recurso não encontrado.', 404);

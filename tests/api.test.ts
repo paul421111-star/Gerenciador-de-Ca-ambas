@@ -5,8 +5,8 @@ import { openDatabase, row } from '../src/server/db.ts';
 import { seed } from '../src/server/seed.ts';
 import { handleApi } from '../src/server/api.ts';
 const password = 'Private-test-admin-password!';
-function fixture() { const db = openDatabase(':memory:'); seed(db, { email: 'admin@test.local', password }); const req = (path: string, method = 'GET', body?: unknown, cookie?: string, headers: Record<string, string> = {}) => handleApi(new Request('http://localhost:3000' + path, { method, headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), db); return { db, req, login: async () => { const r = await req('/api/login', 'POST', { email: 'admin@test.local', password }); assert.equal(r.status, 200); return r.headers.get('set-cookie')!.split(';')[0]; } }; }
-test('API rejects anonymous access and never returns a password hash', async () => { const f = fixture(); try {
+async function fixture() { const db = openDatabase(':memory:'); await seed(db, { email: 'admin@test.local', password }); const req = (path: string, method = 'GET', body?: unknown, cookie?: string, headers: Record<string, string> = {}) => handleApi(new Request('http://localhost:3000' + path, { method, headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), db); return { db, req, login: async () => { const r = await req('/api/login', 'POST', { email: 'admin@test.local', password }); assert.equal(r.status, 200); return r.headers.get('set-cookie')!.split(';')[0]; } }; }
+test('API rejects anonymous access and never returns a password hash', async () => { const f = await fixture(); try {
     assert.equal((await f.req('/api/snapshot')).status, 401);
     const c = await f.login(), r = await f.req('/api/snapshot', 'GET', undefined, c);
     assert.equal(r.status, 200);
@@ -19,29 +19,29 @@ test('API rejects anonymous access and never returns a password hash', async () 
 finally {
     f.db.close();
 } });
-test('API writes persist and duplicate requests return one result', async () => { const f = fixture(); try {
+test('API writes persist and duplicate requests return one result', async () => { const f = await fixture(); try {
     const c = await f.login(), key = randomUUID(), body = { action: 'createCustomer', payload: { name: 'API Customer', contact: 'Recipient', phone: '11912345678' } };
     const first = await f.req('/api/command', 'POST', body, c, { 'idempotency-key': key }), second = await f.req('/api/command', 'POST', body, c, { 'idempotency-key': key });
     assert.equal(first.status, 200);
     assert.deepEqual(await first.json(), await second.json());
-    assert.equal(row<{
+    assert.equal((await row<{
         n: number;
-    }>(f.db, 'SELECT COUNT(*) n FROM customers')!.n, 1);
+    }>(f.db, 'SELECT COUNT(*) n FROM customers'))!.n, 1);
 }
 finally {
     f.db.close();
 } });
-test('API forbids cross-site writes even with a valid session cookie', async () => { const f = fixture(); try {
+test('API forbids cross-site writes even with a valid session cookie', async () => { const f = await fixture(); try {
     const c = await f.login(), r = await f.req('/api/command', 'POST', { action: 'createCustomer', payload: {} }, c, { origin: 'https://evil.test', 'idempotency-key': randomUUID() });
     assert.equal(r.status, 403);
-    assert.equal(row<{
+    assert.equal((await row<{
         n: number;
-    }>(f.db, 'SELECT COUNT(*) n FROM customers')!.n, 0);
+    }>(f.db, 'SELECT COUNT(*) n FROM customers'))!.n, 0);
 }
 finally {
     f.db.close();
 } });
-test('API logout invalidates server-side session', async () => { const f = fixture(); try {
+test('API logout invalidates server-side session', async () => { const f = await fixture(); try {
     const c = await f.login();
     assert.equal((await f.req('/api/logout', 'POST', {}, c)).status, 200);
     assert.equal((await f.req('/api/snapshot', 'GET', undefined, c)).status, 401);
@@ -49,7 +49,7 @@ test('API logout invalidates server-side session', async () => { const f = fixtu
 finally {
     f.db.close();
 } });
-test('API enforces idempotency and errors without exposing SQL or stack traces', async () => { const f = fixture(); try {
+test('API enforces idempotency and errors without exposing SQL or stack traces', async () => { const f = await fixture(); try {
     const c = await f.login(), r = await f.req('/api/command', 'POST', { action: 'createCustomer', payload: {} }, c);
     assert.equal(r.status, 400);
     const s = await r.json();
@@ -62,7 +62,7 @@ finally {
 test('API preserves leading and trailing spaces in passwords during login and rotation', async () => {
     const db = openDatabase(':memory:');
     const original = '  test-secret-with-spaces  ', next = '  rotated-test-secret  ';
-    seed(db, { email: 'spaces@test.local', password: original });
+    await seed(db, { email: 'spaces@test.local', password: original });
     const req = (path: string, body: unknown, cookie?: string) => handleApi(new Request('http://localhost:3000' + path, { method: 'POST', headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', 'idempotency-key': randomUUID(), ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) }), db);
     try {
         const login = await req('/api/login', { email: 'spaces@test.local', password: original });

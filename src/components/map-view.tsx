@@ -3,7 +3,7 @@ import { useRef, useState, useEffect, useMemo } from 'react';
 import { useData } from './provider';
 import { Heading, Card, Button, Badge, Notice, Empty } from './ui';
 import { Icon } from './icons';
-import { dateTime } from '../shared/format';
+import { dateTime, pickupForecastLabel, PRECISION_LABEL } from '../shared/format';
 import { REGION, fitBounds, resolveCoordinates, type GeoPoint } from '../shared/geo';
 import type { Rental } from '../shared/types';
 const TILE = 256;
@@ -33,12 +33,17 @@ export function MapView() {
             return rows;
         return rows.filter(r => [r.address, r.neighborhood, r.city, r.code, s.containers.find(c => c.id === r.containerId)?.code, s.customers.find(c => c.id === r.customerId)?.name].some(value => String(value ?? '').toLowerCase().includes(term)));
     }, [s, showPlanned, query]);
-    const points = list.map(r => ({ rental: r, point: pointOf(r, extras) })).filter((item): item is { rental: Rental; point: GeoPoint } => item.point !== null);
+    const points = useMemo(() => list.map(r => ({ rental: r, point: pointOf(r, extras) })).filter((item): item is { rental: Rental; point: GeoPoint } => item.point !== null), [list, extras]);
     useEffect(() => {
         const el = mapRef.current;
         if (!el)
             return;
-        const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+        const update = () => {
+            const w = el.clientWidth, h = el.clientHeight;
+            setSize(current => current.w === w && current.h === h ? current : { w, h });
+        };
+        update();
+        const ro = new ResizeObserver(update);
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
@@ -69,13 +74,15 @@ export function MapView() {
         return () => el.removeEventListener('wheel', onWheel);
     }, [size.w, size.h]);
     useEffect(() => {
-        if (fitted.current || !size.w)
+        if (!size.w)
             return;
         if (!points.length) {
-            setCenter({ lat: REGION.lat, lon: REGION.lon });
-            setZoom(REGION.zoom);
+            setCenter(current => current.lat === REGION.lat && current.lon === REGION.lon ? current : { lat: REGION.lat, lon: REGION.lon });
+            setZoom(current => current === REGION.zoom ? current : REGION.zoom);
             return;
         }
+        if (fitted.current)
+            return;
         const bounds = fitBounds(points.map(item => item.point), size);
         setCenter(bounds.center);
         setZoom(bounds.zoom);
@@ -135,7 +142,8 @@ export function MapView() {
                     <div className="row split"><strong>{s.containers.find(c => c.id === r.containerId)?.code}</strong><Badge status={r.status}/></div>
                     <p>{r.address}</p>
                     <small>{r.neighborhood} · {r.city}</small>
-                    <small>{pointOf(r, extras) ? s.customers.find(c => c.id === r.customerId)?.name : 'Localizando no mapa...'}</small>
+                    <small>{s.customers.find(c => c.id === r.customerId)?.name}</small>
+                    <small>{PRECISION_LABEL[r.locationPrecision ?? 'PENDING']}</small>
                 </button>) : <Empty title="Nenhuma caçamba no cliente" description="Confirme entregas para visualizar os locais." icon="pin"/>}
             </div>
             <div ref={mapRef} className="map-container" role="region" aria-label="Mapa de Taboão da Serra e Embu das Artes: arraste, role o mouse para aproximar e use os botões" onPointerDown={e => { if ((e.target as HTMLElement).closest('button,a'))
@@ -146,7 +154,7 @@ export function MapView() {
                     const p = project(point.lat, point.lon, zoom), planned = ['RESERVED', 'DELIVERING'].includes(r.status), x = p.x - left, y = p.y - top;
                     if (x < -70 || x > size.w + 70 || y < -70 || y > size.h + 70)
                         return null;
-                    return <button className={`map-pin ${selected === r.id ? 'selected' : ''} ${planned ? 'planned' : ''}`} style={{ left: x, top: y }} key={r.id} onClick={() => focus(r.id)} aria-label={`${s.containers.find(c => c.id === r.containerId)?.code}: ${planned ? 'destino previsto' : 'no cliente'}`}><Icon name="bin" size={15}/>{s.containers.find(c => c.id === r.containerId)?.code}</button>;
+                    return <button className={`map-pin ${selected === r.id ? 'selected' : ''} ${planned ? 'planned' : ''} ${r.locationPrecision === 'APPROXIMATE' ? 'approximate' : ''}`} style={{ left: x, top: y }} key={r.id} onClick={() => focus(r.id)} aria-label={`${s.containers.find(c => c.id === r.containerId)?.code}: ${planned ? 'destino previsto' : 'no cliente'} · ${PRECISION_LABEL[r.locationPrecision ?? 'PENDING']}`}><Icon name="bin" size={15}/>{s.containers.find(c => c.id === r.containerId)?.code}</button>;
                 })}
                 <div className="map-region-chip">{REGION.label}</div>
                 <div className="map-controls">
@@ -162,8 +170,8 @@ export function MapView() {
         {selected && (() => {
             const r = list.find(item => item.id === selected);
             const point = r ? pointOf(r, extras) : null;
-            return r ? <Card><div className="selected-location"><div><h3>{s.containers.find(c => c.id === r.containerId)?.code} / {s.customers.find(c => c.id === r.customerId)?.name}</h3><p>{r.address}, {r.neighborhood}, {r.city}</p><small>Retirada prevista: {dateTime(r.pickupAt)} · {r.siteContact} / {r.sitePhone}</small></div><div className="row wrap"><Button variant="primary" onClick={() => openDetail(r.id)}>Ver locação</Button><a className="button secondary" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(point ? `${point.lat},${point.lon}` : `${r.address}, ${r.city}`)}`}><Icon name="external" size={16}/>Abrir no Maps</a></div></div></Card> : null;
+            return r ? <Card><div className="selected-location"><div><h3>{s.containers.find(c => c.id === r.containerId)?.code} / {s.customers.find(c => c.id === r.customerId)?.name}</h3><p>{r.address}, {r.neighborhood}, {r.city}</p><small>{PRECISION_LABEL[r.locationPrecision ?? 'PENDING']}{r.locationPrecision === 'APPROXIMATE' ? ' — não use este ponto como endereço exato.' : ''}</small><small>Retirada prevista: {pickupForecastLabel(r)} · {r.siteContact} / {r.sitePhone}</small></div><div className="row wrap"><Button variant="primary" onClick={() => openDetail(r.id)}>Ver locação</Button><a className="button secondary" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.locationPrecision === 'CONFIRMED' && point ? `${point.lat},${point.lon}` : `${r.address}, ${r.city}`)}`}><Icon name="external" size={16}/>Abrir no Maps</a></div></div></Card> : null;
         })()}
-        <Notice>O mapa abre em Taboão da Serra e Embu das Artes. Ao informar o CEP ou o endereço da locação, o marcador é posicionado automaticamente. Destinos previstos não representam a posição atual da caçamba.</Notice>
+        <Notice>O mapa abre em Taboão da Serra e Embu das Artes. Posição confirmada, aproximada e pendente aparecem com texto. O centro da cidade não é gravado como endereço exato. Destinos previstos não representam a posição atual da caçamba.</Notice>
     </div>;
 }

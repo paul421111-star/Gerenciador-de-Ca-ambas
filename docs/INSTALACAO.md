@@ -50,6 +50,8 @@ DATABASE_PATH=./data/jr.sqlite
 BACKUP_DIR=./backups
 ```
 
+Para gravar no Supabase, coloque a URL do Transaction Pooler em `DATABASE_URL` no `.env` (nunca no Git) e rode `npm run setup`. A demonstração (`npm run demo` / `npm run dev:demo`) continua em `data/demo.sqlite` e ignora essa URL.
+
 `APP_URL` é a origem exata utilizada pelo navegador. Ela protege as operações de gravação contra requisições de outras origens. Ao mudar host ou porta, atualize o valor e reinicie o servidor.
 
 Para testar pelo celular na mesma rede local, use o IP real do computador servidor em `APP_URL`, por exemplo `http://192.168.1.50:3000`, e acesse esse mesmo endereço nos dispositivos. O IP é apenas um exemplo. Libere a porta somente na rede privada confiável do seu firewall. Não exponha o servidor de desenvolvimento diretamente na internet. Geolocalização no celular pode exigir HTTPS.

@@ -1,11 +1,11 @@
 import type { Snapshot, Container, Customer, CustomerSite, Driver, Truck, Job, Rental, Maintenance, Payment } from '../shared/types';
-import { toLocalInput, fromLocalInput, cents, LABEL, ROLE_LABEL, sortSites } from '../shared/format';
+import { toLocalInput, fromLocalInput, cents, LABEL, ROLE_LABEL, sortSites, customerPlaceLabel, pickupForecastLabel } from '../shared/format';
 import { formatDocument } from '../shared/document';
 import { rentalGroupOption } from '../shared/rental-groups';
 import { received } from '../shared/reports';
 import type { Run } from './provider';
 import type { FormConfig, Field } from './form-dialog';
-import { resolveCoordinates } from '../shared/geo';
+import { resolveLocation } from '../shared/geo';
 const option = (value: string, label: string) => ({ value, label });
 const text = (name: string, label: string, required = true): Field => ({ name, label, required });
 const select = (name: string, label: string, options: {
@@ -30,7 +30,7 @@ export function rentalForm(s: Snapshot, run: Run, opening = false, binId?: strin
             { ...text('postalCode', 'CEP', false), group: '02 / Local de entrega', hint: 'Ao informar o CEP, rua, bairro e cidade são preenchidos automaticamente.' },
             { ...text('address', 'Rua, número e complemento'), full: true }, text('neighborhood', 'Bairro'), { ...text('city', 'Cidade / UF'), hint: 'Área de operação: Taboão da Serra e Embu das Artes.' }, text('siteContact', 'Responsável no local'), { ...text('sitePhone', 'Telefone no local'), type: 'tel' }, text('wasteType', 'Tipo de resíduo'), ...GPS,
             { name: 'deliveryAt', label: opening ? 'Entrega que já aconteceu' : 'Entrega prevista', type: 'datetime-local', required: true, group: '03 / Programação' },
-            { name: 'openEndedPickup', label: 'Sem data certa de retirada', type: 'checkbox', hint: 'Marque se a caçamba fica no cliente até a coleta ser combinada. A data e o horário reais aparecem depois da retirada.' },
+            { name: 'openEndedPickup', label: 'Retirada sob solicitação', type: 'checkbox', hint: 'A caçamba fica no cliente sem data combinada. Programe a coleta depois, sem inventar uma previsão de 365 dias.' },
             { name: 'pickupAt', label: 'Retirada prevista', type: 'datetime-local', required: true, when: { field: 'openEndedPickup', value: false } },
             select('deliveryDriverId', opening ? 'Motorista que entregou' : 'Motorista da entrega', driverOptions(s)), select('deliveryTruckId', 'Caminhão da entrega', truckOptions(s)),
             { ...select('pickupDriverId', 'Motorista da retirada', driverOptions(s)), when: { field: 'openEndedPickup', value: false } }, { ...select('pickupTruckId', 'Caminhão da retirada', truckOptions(s)), when: { field: 'openEndedPickup', value: false } },
@@ -40,9 +40,9 @@ export function rentalForm(s: Snapshot, run: Run, opening = false, binId?: strin
             ...(opening ? [{ name: 'confirmed', label: 'Conferi que esta caçamba já está neste cliente e que a entrega informada é verdadeira.', type: 'checkbox', required: true } as Field] : [])
         ],
         submit: async (p) => {
-            const point = await resolveCoordinates(p);
+            const located = await resolveLocation(p);
             const measured = p.byMeasurement === true, openEnded = p.openEndedPickup === true;
-            const result = await run(opening ? 'importActiveRental' : 'createRental', { ...p, ...(point ? { latitude: point.lat, longitude: point.lon } : {}), deliveryAt: fromLocalInput(String(p.deliveryAt)), pickupAt: openEnded ? undefined : fromLocalInput(String(p.pickupAt)), byMeasurement: measured, openEndedPickup: openEnded, priceCents: measured ? 0 : cents(String(p.price ?? '')) });
+            const result = await run(opening ? 'importActiveRental' : 'createRental', { ...p, latitude: located.lat, longitude: located.lon, locationPrecision: located.precision, deliveryAt: fromLocalInput(String(p.deliveryAt)), pickupAt: openEnded ? undefined : fromLocalInput(String(p.pickupAt)), byMeasurement: measured, openEndedPickup: openEnded, priceCents: measured ? 0 : cents(String(p.price ?? '')) });
             return result;
         }, submitLabel: opening ? 'Registrar abertura' : 'Agendar locação' };
 }
@@ -54,8 +54,8 @@ export function customerSiteForm(run: Run, customer: Customer, site?: CustomerSi
             { ...text('address', 'Rua, número e complemento'), full: true }, text('neighborhood', 'Bairro'), { ...text('city', 'Cidade / UF'), hint: 'Área de operação: Taboão da Serra e Embu das Artes.' },
             { ...text('contact', 'Responsável no local', false) }, { ...text('phone', 'Telefone no local', false), type: 'tel' }, ...GPS, select('active', 'Cadastro', stateOptions), notes
         ], submit: async (p) => {
-            const point = await resolveCoordinates(p);
-            return run(site ? 'updateCustomerSite' : 'createCustomerSite', { ...p, ...(site ? { id: site.id } : {}), customerId: customer.id, active: Number(p.active), ...(point ? { latitude: point.lat, longitude: point.lon } : {}) });
+            const located = await resolveLocation(p);
+            return run(site ? 'updateCustomerSite' : 'createCustomerSite', { ...p, ...(site ? { id: site.id } : {}), customerId: customer.id, active: Number(p.active), latitude: located.lat, longitude: located.lon, locationPrecision: located.precision });
         }, submitLabel: site ? 'Salvar grupo' : 'Cadastrar grupo' };
 }
 export function driverForm(run: Run, d?: Driver): FormConfig { return { title: d ? 'Editar motorista' : 'Novo motorista', description: 'Confira a documentação e a categoria compatível com cada veículo. Este cadastro não cria acesso ao sistema.', initial: d ? { ...d, active: String(d.active) } : { active: '1' }, fields: [text('name', 'Nome completo'), { ...text('phone', 'Telefone com DDD'), type: 'tel' }, text('license', 'Número da CNH'), select('category', 'Categoria da CNH', ['C', 'D', 'E'].map(c => option(c, c))), { name: 'licenseExpiry', label: 'Validade da CNH', type: 'date', required: true }, select('active', 'Cadastro', stateOptions)], submit: p => run(d ? 'updateDriver' : 'createDriver', { ...p, ...(d ? { id: d.id } : {}), active: Number(p.active) }) }; }
@@ -63,6 +63,46 @@ export function truckForm(run: Run, t?: Truck): FormConfig { return { title: t ?
 export function containerForm(run: Run, c?: Container): FormConfig { return { title: c ? `Editar ${c.code}` : 'Nova caçamba', description: 'A disponibilidade muda pela conferência e pelo ciclo operacional, nunca por uma troca manual de status.', initial: c ? { ...c } : {}, fields: [text('code', 'Código de identificação'), { name: 'capacityM3', label: 'Capacidade real (m³)', type: 'number', min: 0.5, max: 50 }, notes], submit: p => run(c ? 'updateContainer' : 'createContainer', { ...p, ...(c ? { id: c.id } : {}) }) }; }
 export function inventoryForm(s: Snapshot, run: Run, id?: string): FormConfig { return { title: 'Conferir caçambas no pátio', description: 'Selecione apenas caçambas fisicamente presentes, vazias e aptas. Faça lotes separados por capacidade.', initial: { ids: id ? [id] : [] }, fields: [{ name: 'ids', label: 'Caçambas aguardando conferência', type: 'multi', options: s.containers.filter(c => c.status === 'INVENTORY').map(c => option(c.id, c.code)), full: true }, { name: 'capacityM3', label: 'Capacidade real deste lote (m³)', type: 'number', required: true, min: 0.5, max: 50 }, { name: 'confirmed', label: 'Conferi presencialmente que todas as selecionadas estão vazias, aptas e no pátio.', type: 'checkbox', required: true }], submit: p => run('confirmInventory', p), submitLabel: 'Confirmar e liberar' }; }
 export function scheduleForm(s: Snapshot, run: Run, j: Job): FormConfig { return { title: `Reagendar ${LABEL[j.kind].toLowerCase()}`, description: 'Preserva o histórico de horários e responsáveis. Não altera o preço contratado.', initial: { ...j, scheduledAt: toLocalInput(j.scheduledAt) }, fields: [{ name: 'scheduledAt', label: 'Novo horário previsto', type: 'datetime-local', required: true }, { name: 'durationMinutes', label: 'Janela de serviço (minutos)', type: 'number', required: true, min: 15, max: 480 }, select('driverId', 'Motorista', driverOptions(s)), select('truckId', 'Caminhão', truckOptions(s)), { name: 'reason', label: 'Motivo do reagendamento', type: 'textarea', required: true, full: true }], submit: p => run('rescheduleJob', { ...p, id: j.id, version: j.version, scheduledAt: fromLocalInput(String(p.scheduledAt)) }) }; }
+export function pickupConfirmForm(s: Snapshot, run: Run, r: Rental): FormConfig {
+    const bin = s.containers.find(item => item.id === r.containerId);
+    const customer = s.customers.find(item => item.id === r.customerId);
+    const site = s.customerSites.find(item => item.id === r.siteId);
+    const pickup = s.jobs.find(j => j.rentalId === r.id && j.kind === 'PICKUP');
+    const driver = s.drivers.find(d => d.id === pickup?.driverId);
+    const truck = s.trucks.find(t => t.id === pickup?.truckId);
+    const needsTeam = !pickup;
+    return {
+        title: 'Confirmar retirada',
+        description: `${bin?.code ?? 'Caçamba'} · ${customerPlaceLabel(customer, site)}. ${r.address}, ${r.neighborhood}. ${pickup ? `Equipe: ${driver?.name ?? 'Motorista'} · ${truck?.code ?? 'Caminhão'}. Previsão: ${pickupForecastLabel(r)}.` : 'Informe a equipe desta coleta. Não usamos automaticamente o motorista da entrega.'}`,
+        initial: { pickupDriverId: pickup?.driverId ?? s.drivers.find(d => d.active)?.id ?? '', pickupTruckId: pickup?.truckId ?? s.trucks.find(t => t.plate && t.status === 'AVAILABLE')?.id ?? '', durationMinutes: s.settings.jobDurationMinutes, confirmed: false },
+        fields: [
+            ...(needsTeam ? [select('pickupDriverId', 'Motorista da retirada', driverOptions(s)), select('pickupTruckId', 'Caminhão da retirada', truckOptions(s)), { name: 'durationMinutes', label: 'Janela do serviço (minutos)', type: 'number', required: true, min: 15, max: 480, step: 15 } as Field] : []),
+            { name: 'confirmed', label: `Confirmei a coleta de ${bin?.code ?? 'esta caçamba'} neste local, com esta equipe.`, type: 'checkbox', required: true }
+        ],
+        submit: p => run('confirmPickup', { ...p, id: r.id, version: r.version }),
+        submitLabel: 'Confirmar retirada'
+    };
+}
+export function schedulePickupForm(s: Snapshot, run: Run, r: Rental): FormConfig {
+    return {
+        title: 'Programar retirada',
+        description: 'Recebe o pedido agora e agenda a coleta sem registrar movimentação. A caçamba permanece no cliente.',
+        initial: { scheduledAt: toLocalInput(new Date(Date.now() + 86400000)), pickupDriverId: s.drivers.find(d => d.active)?.id ?? '', pickupTruckId: s.trucks.find(t => t.plate && t.status === 'AVAILABLE')?.id ?? '', durationMinutes: s.settings.jobDurationMinutes },
+        fields: [{ name: 'scheduledAt', label: 'Horário da retirada', type: 'datetime-local', required: true }, select('pickupDriverId', 'Motorista da retirada', driverOptions(s)), select('pickupTruckId', 'Caminhão da retirada', truckOptions(s)), { name: 'durationMinutes', label: 'Janela do serviço (minutos)', type: 'number', required: true, min: 15, max: 480, step: 15 }],
+        submit: p => run('schedulePickup', { ...p, id: r.id, version: r.version, scheduledAt: fromLocalInput(String(p.scheduledAt)) }),
+        submitLabel: 'Programar retirada'
+    };
+}
+export function regularizePickupForm(s: Snapshot, run: Run, r: Rental): FormConfig {
+    return {
+        title: 'Regularizar coleta já ocorrida',
+        description: 'Use somente se a caçamba já saiu do cliente e o horário de saída não deve ser inventado. Informe a equipe e o motivo.',
+        initial: { pickupDriverId: s.drivers.find(d => d.active)?.id ?? '', pickupTruckId: s.trucks.find(t => t.plate && t.status === 'AVAILABLE')?.id ?? '', durationMinutes: s.settings.jobDurationMinutes },
+        fields: [select('pickupDriverId', 'Motorista da coleta', driverOptions(s)), select('pickupTruckId', 'Caminhão da coleta', truckOptions(s)), { name: 'reason', label: 'Motivo da regularização', type: 'textarea', required: true, full: true }],
+        submit: p => run('regularizePickup', { ...p, id: r.id, version: r.version }),
+        submitLabel: 'Regularizar coleta'
+    };
+}
 export function transitionForm(s: Snapshot, run: Run, r: Rental, action: string, extras?: { assignPickup?: boolean }): FormConfig {
     const titles: Record<string, string> = { start_delivery: 'Iniciar entrega', complete_delivery: 'Confirmar entrega no local', start_pickup: 'Iniciar retirada', complete_pickup: 'Confirmar coleta no cliente', return_yard: 'Conferir retorno ao pátio', cancel: 'Cancelar locação', abort_delivery: 'Registrar entrega não realizada', abort_pickup: 'Registrar retirada não realizada' };
     const abort = action.startsWith('abort'), reason = abort || action === 'cancel', assignPickup = extras?.assignPickup === true;
