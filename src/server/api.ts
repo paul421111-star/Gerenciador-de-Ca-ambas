@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type DB, database, row } from './db.ts';
 import { authenticate, sessionUser, revokeSession } from './auth.ts';
 import { execute, snapshot, rentalSignaturesFor } from './service.ts';
-import { assert, AppError } from './errors.ts';
+import { assert, AppError, unavailableDatabase } from './errors.ts';
 import { object, secret, email } from './validate.ts';
 import { cookieToken, sessionCookie, sameOrigin, readJson, json, errorResponse } from './http.ts';
 import { lookupCep } from './cep.ts';
@@ -26,7 +26,7 @@ export async function handleApi(request: Request, providedDB?: DB): Promise<Resp
             catch (error) {
                 if (error instanceof AppError)
                     throw error;
-                throw new AppError('Banco indisponível.', 503);
+                throw unavailableDatabase(error) ?? new AppError('Banco indisponível.', 503);
             }
         }
         if (request.method !== 'GET' && request.method !== 'POST')
@@ -79,8 +79,9 @@ export async function handleApi(request: Request, providedDB?: DB): Promise<Resp
         throw new AppError('Recurso não encontrado.', 404);
     }
     catch (error) {
-        if (error instanceof AppError)
-            error.requestId = requestId;
-        return errorResponse(error, requestId);
+        const mapped = error instanceof AppError ? error : unavailableDatabase(error) ?? error;
+        if (mapped instanceof AppError)
+            mapped.requestId = requestId;
+        return errorResponse(mapped, requestId);
     }
 }

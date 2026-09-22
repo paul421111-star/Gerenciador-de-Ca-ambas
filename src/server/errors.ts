@@ -39,3 +39,10 @@ export function assert(condition: unknown, message: string, status = 400): asser
     if (!condition)
         throw new AppError(message, status);
 }
+export function unavailableDatabase(error: unknown): AppError | null {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: string }).code ?? '') : '';
+    if (code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || /tenant\/user|getaddrinfo ENOTFOUND|CONNECT_TIMEOUT|timeout expired/i.test(message))
+        return new AppError('Não foi possível conectar ao banco. Confira se o projeto do Supabase está ativo e se a conexão em .env está atualizada.', 503);
+    return null;
+}
