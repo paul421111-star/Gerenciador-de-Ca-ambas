@@ -31,6 +31,51 @@ test('API writes persist and duplicate requests return one result', async () => 
 finally {
     f.db.close();
 } });
+test('public booking stores a request without creating an operational rental', async () => { const f = await fixture(); try {
+    const preferredDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const payload = {
+        customerName: 'Cliente Público',
+        phone: '(11) 95629-2968',
+        email: 'cliente@example.test',
+        serviceType: 'RENTAL',
+        postalCode: '06784-300',
+        address: 'Rua Agelina, 424',
+        neighborhood: 'Jardim Record',
+        city: 'Taboão da Serra / SP',
+        preferredDate,
+        preferredPeriod: 'MORNING',
+        wasteType: 'Entulho de obra / construção',
+        notes: 'Portão lateral',
+        companyWebsite: '',
+        consent: true
+    };
+    const response = await f.req('/api/public/booking', 'POST', payload);
+    assert.equal(response.status, 201);
+    const body = await response.json();
+    assert.match(body.protocol, /^JR-\d{8}-[A-F0-9]{6}$/);
+    assert.equal((await row<{ n: number }>(f.db, 'SELECT COUNT(*) n FROM bookingRequests'))!.n, 1);
+    assert.equal((await row<{ n: number }>(f.db, 'SELECT COUNT(*) n FROM rentals'))!.n, 0);
+    assert.equal((await f.req('/api/public/booking', 'POST', payload)).status, 409);
+    const cookie = await f.login();
+    const snapshot = await (await f.req('/api/snapshot', 'GET', undefined, cookie)).json();
+    assert.equal(snapshot.bookingRequests.length, 1);
+    const update = await f.req('/api/command', 'POST', { action: 'updateBookingRequest', payload: { id: body.id, status: 'CONTACTED', statusNote: 'Contato iniciado pela equipe.' } }, cookie, { 'idempotency-key': randomUUID() });
+    assert.equal(update.status, 200);
+    assert.equal((await row<{ status: string }>(f.db, 'SELECT status FROM bookingRequests WHERE id=?', body.id))!.status, 'CONTACTED');
+}
+finally {
+    f.db.close();
+} });
+test('public booking requires consent and rejects cross-site submissions', async () => { const f = await fixture(); try {
+    const preferredDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const payload = { customerName: 'Cliente', phone: '11956292968', email: '', serviceType: 'RENTAL', postalCode: '', address: 'Rua de Teste, 10', neighborhood: 'Centro', city: 'Taboão da Serra / SP', preferredDate, preferredPeriod: 'ANY', wasteType: 'Entulho', notes: '', companyWebsite: '', consent: false };
+    assert.equal((await f.req('/api/public/booking', 'POST', payload)).status, 400);
+    assert.equal((await f.req('/api/public/booking', 'POST', { ...payload, consent: true }, undefined, { origin: 'https://evil.test' })).status, 403);
+    assert.equal((await row<{ n: number }>(f.db, 'SELECT COUNT(*) n FROM bookingRequests'))!.n, 0);
+}
+finally {
+    f.db.close();
+} });
 test('API forbids cross-site writes even with a valid session cookie', async () => { const f = await fixture(); try {
     const c = await f.login(), r = await f.req('/api/command', 'POST', { action: 'createCustomer', payload: {} }, c, { origin: 'https://evil.test', 'idempotency-key': randomUUID() });
     assert.equal(r.status, 403);

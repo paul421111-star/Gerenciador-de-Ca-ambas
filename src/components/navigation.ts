@@ -7,6 +7,7 @@ export const NAV: {
     roles?: string[];
 }[] = [
     { path: 'painel', label: 'Visão geral', icon: 'dashboard', group: 'OPERAÇÃO' },
+    { path: 'solicitacoes', label: 'Solicitações de clientes', icon: 'calendar', group: 'OPERAÇÃO', roles: ['ADMIN', 'DISPATCHER'] },
     { path: 'locacoes', label: 'Locações', icon: 'bin', group: 'OPERAÇÃO', roles: ['ADMIN', 'DISPATCHER'] },
     { path: 'agenda', label: 'Agenda de serviços', icon: 'calendar', group: 'OPERAÇÃO', roles: ['ADMIN', 'DISPATCHER'] },
     { path: 'minha-rota', label: 'Meus serviços', icon: 'route', group: 'OPERAÇÃO', roles: ['DRIVER'] },
@@ -24,7 +25,7 @@ export const NAV: {
     { path: 'conta', label: 'Minha conta', icon: 'lock', group: 'SISTEMA' },
     { path: 'ajuda', label: 'Guia de operação', icon: 'help', group: 'SISTEMA' }
 ];
-export const PRIMARY_NAV = ['painel', 'locacoes', 'agenda', 'minha-rota', 'cacambas', 'mapa'];
+export const PRIMARY_NAV = ['painel', 'solicitacoes', 'locacoes', 'agenda', 'minha-rota', 'cacambas', 'mapa'];
 export function visibleNav(role: string) {
     return NAV.filter(item => !item.roles || item.roles.includes(role));
 }

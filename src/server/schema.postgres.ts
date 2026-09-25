@@ -80,6 +80,17 @@ CREATE TABLE IF NOT EXISTS maintenance (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_maintenance_container ON maintenance(containerId) WHERE closedAt IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_maintenance_truck ON maintenance(truckId) WHERE closedAt IS NULL;
+CREATE TABLE IF NOT EXISTS bookingRequests (
+ id TEXT PRIMARY KEY, protocol TEXT NOT NULL UNIQUE, customerName TEXT NOT NULL, phone TEXT NOT NULL, email TEXT NOT NULL DEFAULT '',
+ serviceType TEXT NOT NULL CHECK(serviceType IN ('RENTAL','EXCHANGE','PICKUP')),
+ postalCode TEXT NOT NULL DEFAULT '', address TEXT NOT NULL, neighborhood TEXT NOT NULL, city TEXT NOT NULL,
+ preferredDate TEXT NOT NULL, preferredPeriod TEXT NOT NULL CHECK(preferredPeriod IN ('MORNING','AFTERNOON','ANY')),
+ wasteType TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+ status TEXT NOT NULL DEFAULT 'NEW' CHECK(status IN ('NEW','CONTACTED','CONFIRMED','DECLINED')),
+ statusNote TEXT NOT NULL DEFAULT '', handledBy TEXT REFERENCES users(id), createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_booking_requests_status ON bookingRequests(status,createdAt);
+CREATE INDEX IF NOT EXISTS idx_booking_requests_phone ON bookingRequests(phone,createdAt);
 CREATE TABLE IF NOT EXISTS audit (
  id TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id), action TEXT NOT NULL, entityId TEXT NOT NULL, detail TEXT NOT NULL, createdAt TEXT NOT NULL
 );

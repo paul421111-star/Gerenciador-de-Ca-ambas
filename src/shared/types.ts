@@ -132,6 +132,29 @@ export interface Maintenance {
     createdBy: string;
     resolution: string;
 }
+export type BookingRequestStatus = 'NEW' | 'CONTACTED' | 'CONFIRMED' | 'DECLINED';
+export type BookingServiceType = 'RENTAL' | 'EXCHANGE' | 'PICKUP';
+export interface BookingRequest {
+    id: string;
+    protocol: string;
+    customerName: string;
+    phone: string;
+    email: string;
+    serviceType: BookingServiceType;
+    postalCode: string;
+    address: string;
+    neighborhood: string;
+    city: string;
+    preferredDate: string;
+    preferredPeriod: 'MORNING' | 'AFTERNOON' | 'ANY';
+    wasteType: string;
+    notes: string;
+    status: BookingRequestStatus;
+    statusNote: string;
+    handledBy: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
 export interface RentalEvent {
     id: string;
     rentalId: string;
@@ -193,10 +216,11 @@ export interface Snapshot {
     events: RentalEvent[];
     payments: Payment[];
     maintenance: Maintenance[];
+    bookingRequests: BookingRequest[];
     users: User[];
     audit: Audit[];
 }
-export type CommandName = 'createRental' | 'importActiveRental' | 'transitionRental' | 'rescheduleJob' | 'schedulePickup' | 'regularizePickup' | 'createCustomer' | 'updateCustomer' | 'createCustomerSite' | 'updateCustomerSite' | 'importRentalGroups' | 'confirmPickup' | 'saveRentalSignatures' | 'createDriver' | 'updateDriver' | 'createTruck' | 'updateTruck' | 'createContainer' | 'updateContainer' | 'confirmInventory' | 'addPayment' | 'voidPayment' | 'startMaintenance' | 'finishMaintenance' | 'createUser' | 'setUserActive' | 'changePassword' | 'saveSettings';
+export type CommandName = 'createRental' | 'importActiveRental' | 'transitionRental' | 'rescheduleJob' | 'schedulePickup' | 'regularizePickup' | 'createCustomer' | 'updateCustomer' | 'createCustomerSite' | 'updateCustomerSite' | 'importRentalGroups' | 'confirmPickup' | 'saveRentalSignatures' | 'createDriver' | 'updateDriver' | 'createTruck' | 'updateTruck' | 'createContainer' | 'updateContainer' | 'confirmInventory' | 'addPayment' | 'voidPayment' | 'startMaintenance' | 'finishMaintenance' | 'createUser' | 'setUserActive' | 'changePassword' | 'saveSettings' | 'updateBookingRequest';
 export interface Command {
     action: CommandName;
     payload: Record<string, unknown>;

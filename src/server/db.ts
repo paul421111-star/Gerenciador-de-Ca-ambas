@@ -40,7 +40,9 @@ const CAMEL_COLUMNS = [
     'rentalId', 'scheduledAt', 'durationMinutes', 'startedAt', 'completedAt',
     'actorId', 'occurredAt', 'amountCents', 'paidAt', 'voidedAt', 'voidReason',
     'truckId', 'costCents', 'openedAt', 'closedAt', 'signerName', 'signedAt',
-    'replacedAt', 'replacedBy', 'replaceReason'
+    'replacedAt', 'replacedBy', 'replaceReason', 'customerName', 'serviceType',
+    'preferredDate', 'preferredPeriod',
+    'statusNote', 'handledBy'
 ] as const;
 const COLUMN_ALIASES = Object.fromEntries(CAMEL_COLUMNS.map(name => [name.toLowerCase(), name]));
 function normalizeValue(value: unknown): unknown {
@@ -324,10 +326,20 @@ export async function settings(db: DB): Promise<Settings> {
     return { ...DEFAULT_SETTINGS, ...JSON.parse(stored!.json) };
 }
 
-const state = globalThis as unknown as { jrDB?: DB };
+const state = globalThis as unknown as { jrDB?: DB; jrDBPromise?: Promise<DB> };
 export async function database(): Promise<DB> {
     if (state.jrDB)
         return state.jrDB;
-    state.jrDB = usesPostgres() ? await openPostgres() : openDatabase(databasePath());
-    return state.jrDB;
+    if (!state.jrDBPromise) {
+        state.jrDBPromise = Promise.resolve(usesPostgres() ? openPostgres() : openDatabase(databasePath()))
+            .then(db => {
+                state.jrDB = db;
+                return db;
+            })
+            .catch(error => {
+                delete state.jrDBPromise;
+                throw error;
+            });
+    }
+    return state.jrDBPromise;
 }

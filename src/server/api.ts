@@ -8,6 +8,7 @@ import { cookieToken, sessionCookie, sameOrigin, readJson, json, errorResponse }
 import { lookupCep } from './cep.ts';
 import { lookupCnpj } from './cnpj.ts';
 import { geocodePayload, lookupGeocode } from './geocode.ts';
+import { createPublicBooking } from './booking.ts';
 /** Shared Web API handler: exercised directly by tests and exposed through Next Route Handlers. */
 export async function handleApi(request: Request, providedDB?: DB): Promise<Response> {
     const requestId = request.headers.get('x-request-id')?.trim() || randomUUID();
@@ -34,7 +35,11 @@ export async function handleApi(request: Request, providedDB?: DB): Promise<Resp
         // Reject cross-origin mutations before reading data or creating a database connection.
         if (request.method === 'POST')
             sameOrigin(request);
+        if (request.method === 'GET' && path.startsWith('/api/public/cep/'))
+            return json(await lookupCep(path.slice('/api/public/cep/'.length)));
         const db = providedDB ?? await database();
+        if (path === '/api/public/booking' && request.method === 'POST')
+            return json(await createPublicBooking(db, await readJson(request, 20000)), 201);
         if (path === '/api/login' && request.method === 'POST') {
             assert(Number((await row<{
                 n: number | string;

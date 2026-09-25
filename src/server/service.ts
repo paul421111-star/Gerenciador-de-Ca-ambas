@@ -6,7 +6,7 @@ import { createAccount, hashPassword, verifyPassword, USER_COLUMNS, sha256 } fro
 import { dateKey, dateTime, money } from "../shared/format.ts";
 import { rentalGroupCatalog } from "../shared/rental-groups.ts";
 import { isSignatureImage } from "../shared/signature.ts";
-import type { CommandResult, Container, Customer, CustomerSite, Driver, Truck, User, Rental, Job, Payment, Maintenance, RentalEvent, Audit, Snapshot, Settings, RentalSignature, RentalSignatureRevision } from "../shared/types.ts";
+import type { CommandResult, Container, Customer, CustomerSite, Driver, Truck, User, Rental, Job, Payment, Maintenance, RentalEvent, Audit, Snapshot, Settings, RentalSignature, RentalSignatureRevision, BookingRequest } from "../shared/types.ts";
 const OPEN = "('RESERVED','DELIVERING','ACTIVE','COLLECTING','RETURNING')";
 const TABLES = ["containers", "customers", "customerSites", "drivers", "trucks", "rentals", "jobs", "payments", "maintenance", "users"] as const;
 async function find<T>(db: DB, table: typeof TABLES[number], id: string): Promise<T> {
@@ -521,6 +521,17 @@ async function dispatch(db: DB, u: User, action: string, p: Record<string, unkno
             await db.run(`UPDATE ${m.containerId ? "containers" : "trucks"} SET status='AVAILABLE' WHERE id=?`, m.containerId ?? m.truckId!);
             return { id: m.id, message: "Manutenção concluída e equipamento liberado." };
         }
+        case "updateBookingRequest": {
+            const id = v.str(p, "id", 1);
+            const request = await row<BookingRequest>(db, "SELECT * FROM bookingRequests WHERE id=?", id);
+            assert(request, "Solicitação não encontrada.", 404);
+            const status = v.choice(p, "status", ["NEW", "CONTACTED", "CONFIRMED", "DECLINED"] as const);
+            const statusNote = v.str(p, "statusNote", 0, 500);
+            if (status === "DECLINED")
+                assert(statusNote.length >= 5, "Informe o motivo de não atender esta solicitação.");
+            await db.run("UPDATE bookingRequests SET status=?,statusNote=?,handledBy=?,updatedAt=? WHERE id=?", status, statusNote, u.id, now, id);
+            return { id, message: status === "CONFIRMED" ? "Solicitação marcada como confirmada. Crie a locação operacional após combinar os detalhes com o cliente." : "Situação da solicitação atualizada." };
+        }
         case "createUser": {
             const role = v.choice(p, "role", ["ADMIN", "DISPATCHER", "DRIVER"] as const), mail = v.email(p, "email", true);
             assert(!await row(db, "SELECT id FROM users WHERE email=?", mail), "Este e-mail já está cadastrado.", 409);
@@ -614,6 +625,7 @@ export async function snapshot(db: DB, actor: User): Promise<Snapshot> {
             events: (await rows<RentalEvent>(db, "SELECT e.*,u.name actorName FROM rentalEvents e JOIN users u ON u.id=e.actorId ORDER BY occurredAt DESC")).filter(e => (!driver || allowed.has(e.rentalId)) && (!driver || !e.action.startsWith("payment"))),
             payments: driver ? [] : await rows<Payment>(db, "SELECT * FROM payments ORDER BY paidAt DESC"),
             maintenance: driver ? [] : await rows<Maintenance>(db, "SELECT * FROM maintenance ORDER BY openedAt DESC"),
+            bookingRequests: driver ? [] : await rows<BookingRequest>(db, "SELECT * FROM bookingRequests ORDER BY createdAt DESC"),
             users: u.role === "ADMIN" ? await rows<User>(db, `SELECT ${USER_COLUMNS} FROM users ORDER BY createdAt`) : [],
             audit: u.role === "ADMIN" ? await rows<Audit>(db, "SELECT a.*,u.name actorName FROM audit a JOIN users u ON a.actorId=u.id ORDER BY a.createdAt DESC LIMIT 200") : []
         };

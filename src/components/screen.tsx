@@ -8,6 +8,7 @@ import { MapView } from './map-view';
 import { Customers, Drivers, Fleet } from './catalogs';
 import { Finance, Maintenances, Reports } from './management';
 import { Settings, Users, Audit, Account, Help } from './administration';
+import { BookingRequests } from './booking-requests';
 export function Screen({ section }: {
     section: string;
 }) {
@@ -17,6 +18,7 @@ export function Screen({ section }: {
         return <Notice tone="warning">Seu perfil não tem acesso a esta seção.</Notice>;
     switch (section) {
         case 'painel': return <Dashboard />;
+        case 'solicitacoes': return <BookingRequests />;
         case 'locacoes': return <Rentals />;
         case 'agenda': return <Agenda />;
         case 'minha-rota': return <Agenda mine/>;
