@@ -2,7 +2,8 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from
 import { type DB, row, tx } from './db.ts';
 import { assert, AppError } from './errors.ts';
 import type { User, Role } from '../shared/types.ts';
-export const USER_COLUMNS = 'id,name,email,role,driverId,active,createdAt';
+import { isValidUsername, normalizeUsername, usernameFromEmail } from '../shared/username.ts';
+export const USER_COLUMNS = 'id,name,email,username,role,driverId,active,createdAt';
 export const SESSION_COOKIE = 'jr_session';
 export const SESSION_SECONDS = 12 * 60 * 60;
 export const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -24,20 +25,38 @@ export function verifyPassword(password: string, hash: string): boolean {
         return false;
     }
 }
+export async function usernameTaken(db: DB, username: string, exceptId?: string): Promise<boolean> {
+    const found = await row<{ id: string }>(db, 'SELECT id FROM users WHERE LOWER(username)=?', normalizeUsername(username));
+    return Boolean(found && found.id !== exceptId);
+}
 export async function createAccount(db: DB, input: {
     name: string;
     email: string;
+    /** Apelido de login. Omitido/vazio: derivado do e-mail quando estiver livre; null: sem apelido. */
+    username?: string | null;
     password: string;
     role: Role;
     driverId: string | null;
 }, now = new Date().toISOString()): Promise<string> {
     const id = randomUUID();
-    await db.run('INSERT INTO users(id,name,email,passwordHash,role,driverId,createdAt) VALUES(?,?,?,?,?,?,?)', id, input.name, input.email.trim().toLowerCase(), hashPassword(input.password), input.role, input.driverId, now);
+    const email = input.email.trim().toLowerCase();
+    let username: string | null = null;
+    if (input.username) {
+        username = normalizeUsername(input.username);
+        assert(isValidUsername(username), 'Nome de usuário inválido. Use de 3 a 40 caracteres: letras, números, ponto, hífen ou sublinhado.');
+        assert(!await usernameTaken(db, username), 'Este nome de usuário já está em uso.', 409);
+    }
+    else if (input.username === undefined) {
+        const suggested = usernameFromEmail(email);
+        username = suggested && !await usernameTaken(db, suggested) ? suggested : null;
+    }
+    await db.run('INSERT INTO users(id,name,email,username,passwordHash,role,driverId,createdAt) VALUES(?,?,?,?,?,?,?,?)', id, input.name, email, username, hashPassword(input.password), input.role, input.driverId, now);
     return id;
 }
 const DUMMY_HASH = 'scrypt:706d2e3e2f163ff805d0918679511ac8:' + scryptSync('not-a-real-user-password', '706d2e3e2f163ff805d0918679511ac8', 64).toString('hex');
-export async function authenticate(db: DB, email: string, password: string, at = new Date()): Promise<{ user: User; token: string; expiresAt: string; }> {
-    const normalized = email.trim().toLowerCase();
+/** `login` aceita e-mail ou nome de usuário (ambos sem distinção de maiúsculas). */
+export async function authenticate(db: DB, login: string, password: string, at = new Date()): Promise<{ user: User; token: string; expiresAt: string; }> {
+    const normalized = login.trim().toLowerCase();
     assert(normalized.length <= 254 && password.length <= 128, 'Credenciais inválidas.', 401);
     const key = sha256(normalized), now = at.toISOString();
     // Commit failed attempts rather than rolling them back with the login error.
@@ -51,12 +70,12 @@ export async function authenticate(db: DB, email: string, password: string, at =
             return { error: new AppError('Muitas tentativas. Aguarde 15 minutos antes de tentar novamente.', 429) };
         const stored = await row<User & {
             passwordHash: string;
-        }>(db, 'SELECT * FROM users WHERE email=?', normalized);
+        }>(db, normalized.includes('@') ? 'SELECT * FROM users WHERE LOWER(email)=?' : 'SELECT * FROM users WHERE LOWER(username)=?', normalized);
         const valid = verifyPassword(password, stored?.passwordHash ?? DUMMY_HASH);
         if (!stored || !stored.active || !valid) {
             const count = attempt && at.getTime() - Date.parse(attempt.updatedAt) < 15 * 60000 ? attempt.count + 1 : 1;
             await db.run('INSERT INTO loginAttempts(key,count,updatedAt,blockedUntil) VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET count=excluded.count,updatedAt=excluded.updatedAt,blockedUntil=excluded.blockedUntil', key, count, now, count >= 5 ? new Date(at.getTime() + 15 * 60000).toISOString() : null);
-            return { error: new AppError('E-mail ou senha incorretos.', 401) };
+            return { error: new AppError('Usuário, e-mail ou senha incorretos.', 401) };
         }
         await db.run('DELETE FROM loginAttempts WHERE key=?', key);
         await db.run('DELETE FROM sessions WHERE expiresAt<=?', now);

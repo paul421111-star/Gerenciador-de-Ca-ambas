@@ -6,6 +6,7 @@ import { useApp } from './provider';
 import { Icon } from './icons';
 import { NAV, PRIMARY_NAV, visibleNav } from './navigation';
 import { ROLE_LABEL } from '../shared/format';
+import { copyrightLine } from '../shared/brand';
 import { FormDialog } from './form-dialog';
 import { RentalDetail } from './rental-detail';
 import { Button } from './ui';
@@ -70,6 +71,14 @@ export function Shell({ children }: {
     }, []);
     const initials = data.user.name.slice(0, 2).toUpperCase();
     const top = navLayout === 'top';
+    const newRequests = (data.bookingRequests ?? []).filter(r => r.status === 'NEW').length;
+    const badge = (navPath: string) => {
+        if (navPath === 'cacambas')
+            return <em>{data.containers.length}</em>;
+        if (navPath === 'solicitacoes' && newRequests > 0)
+            return <em className="alert" title={`${newRequests} ${newRequests === 1 ? 'nova solicitação' : 'novas solicitações'}`}>{newRequests}</em>;
+        return null;
+    };
     const layoutButton = <button className="icon-button layout-toggle" onClick={() => setLayout(top ? 'side' : 'top')} title={top ? 'Colocar menu na lateral' : 'Colocar menu no topo'} aria-label={top ? 'Colocar menu na lateral' : 'Colocar menu no topo'}>
         <Icon name={top ? 'sidebar' : 'topbar'} size={17}/>
     </button>;
@@ -81,7 +90,7 @@ export function Shell({ children }: {
             <Link href="/painel" className="masthead-brand" onClick={() => setMenu(false)}><img src="/brand-lockup.png" alt="JR Caçambas"/></Link>
             <nav className="masthead-nav" aria-label="Navegação principal" ref={navRef}>
                 {primary.map(item => <Link key={item.path} href={`/${item.path}`} className={`masthead-link ${path === item.path ? 'active' : ''}`} aria-current={path === item.path ? 'page' : undefined}>
-                    {item.label}{item.path === 'cacambas' && <em>{data.containers.length}</em>}
+                    {item.label}{badge(item.path)}
                 </Link>)}
                 {groups.map(group => {
                     const active = group.items.some(item => item.path === path);
@@ -110,7 +119,7 @@ export function Shell({ children }: {
         </header>}
         <aside className={`sidebar ${menu ? 'is-open' : ''}`}>
             <Link href="/painel" className="brand" onClick={() => setMenu(false)}><div className="brand-logo"><img src="/brand-lockup.png" alt="JR Caçambas"/></div></Link>
-            <nav aria-label={top ? 'Menu do aparelho' : 'Navegação principal'}>{items.map((n, i) => <div key={n.path}>{(!i || items[i - 1].group !== n.group) && <div className="nav-group">{n.group}</div>}<Link href={`/${n.path}`} className={`nav-item ${path === n.path ? 'active' : ''}`} aria-current={path === n.path ? 'page' : undefined} onClick={() => setMenu(false)}><Icon name={n.icon} size={18}/>{n.label}{n.path === 'cacambas' && <em>{data.containers.length}</em>}</Link></div>)}</nav>
+            <nav aria-label={top ? 'Menu do aparelho' : 'Navegação principal'}>{items.map((n, i) => <div key={n.path}>{(!i || items[i - 1].group !== n.group) && <div className="nav-group">{n.group}</div>}<Link href={`/${n.path}`} className={`nav-item ${path === n.path ? 'active' : ''}`} aria-current={path === n.path ? 'page' : undefined} onClick={() => setMenu(false)}><Icon name={n.icon} size={18}/>{n.label}{badge(n.path)}</Link></div>)}</nav>
             <div className="sidebar-bottom">
                 <div className={`system-status ${error ? 'disconnected' : ''}`}><i />{error ? 'Conexão interrompida' : 'Conectado ao servidor'}</div>
                 <button type="button" className="sidebar-layout-toggle" onClick={() => setLayout('top')}><Icon name="topbar" size={16}/>Menu no topo</button>
@@ -125,7 +134,7 @@ export function Shell({ children }: {
             {data.settings.demo && <div className="demo-banner"><Icon name="alert" size={14}/><b>MODO DEMONSTRATIVO</b> Dados fictícios, separados da operação real.</div>}
             {error && <div className="sync-error" role="alert"><Icon name="alert"/>{error} Os dados podem estar desatualizados.<button onClick={() => void refresh()}>Reconectar</button></div>}
             <main id="main" className="page-content">{children}</main>
-            <footer className="workspace-footer"><span>JR Caçambas <b>/</b> {current?.label ?? 'Controle operacional'}</span><span>Horários: São Paulo <b>/</b> v1.0.0</span></footer>
+            <footer className="workspace-footer"><span>JR Caçambas <b>/</b> {current?.label ?? 'Controle operacional'}</span><span className="copyright">{copyrightLine()}</span><span>Horários: São Paulo <b>/</b> v1.0.0</span></footer>
         </div>
         {notice && <div className="toast" role="status"><Icon name="check" size={18}/><span>{notice}</span><button onClick={() => notify('')} aria-label="Fechar aviso">×</button></div>}
         {detail && <RentalDetail id={detail} onClose={closeDetail}/>}

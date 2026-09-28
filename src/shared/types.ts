@@ -6,6 +6,8 @@ export interface User {
     id: string;
     name: string;
     email: string;
+    /** Nome de usuário para login (alternativa ao e-mail). Pode ser nulo em contas antigas sem apelido livre. */
+    username: string | null;
     role: Role;
     driverId: string | null;
     active: number;
@@ -193,6 +195,11 @@ export interface Audit {
 export interface Settings {
     companyName: string;
     companyPhone: string;
+    /** WhatsApp públicos da página /agendar (dígitos com DDD). Vazio: usa os números padrão. */
+    whatsappNumbers: string[];
+    /** URLs completas das redes sociais, ou '' para ocultar o botão. */
+    instagramUrl: string;
+    facebookUrl: string;
     yardAddress: string;
     defaultDays: number;
     defaultPriceCents: number;

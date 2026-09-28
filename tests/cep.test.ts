@@ -6,7 +6,9 @@ import { AppError } from '../src/server/errors.ts';
 import { handleApi } from '../src/server/api.ts';
 import { openDatabase } from '../src/server/db.ts';
 import { seed } from '../src/server/seed.ts';
+import { createMathCaptcha } from '../src/server/captcha.ts';
 const password = 'Private-test-admin-password!';
+const solvedMath = () => { const c = createMathCaptcha(); return { captchaId: c.id, captchaAnswer: c.answer }; };
 test('CEP helpers normalize digits, format and detect fields', () => {
     assert.equal(digitsCep('06786-050'), '06786050');
     assert.equal(formatCep('06786050'), '06786-050');
@@ -62,7 +64,7 @@ test('API cep route requires a session and validates the postal code', async () 
     const req = (path: string, cookie?: string) => handleApi(new Request('http://localhost:3000' + path, { headers: { origin: 'http://localhost:3000', ...(cookie ? { cookie } : {}) } }), db);
     try {
         assert.equal((await req('/api/cep/06786050')).status, 401);
-        const login = await handleApi(new Request('http://localhost:3000/api/login', { method: 'POST', headers: { origin: 'http://localhost:3000', 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin@test.local', password }) }), db);
+        const login = await handleApi(new Request('http://localhost:3000/api/login', { method: 'POST', headers: { origin: 'http://localhost:3000', 'content-type': 'application/json' }, body: JSON.stringify({ login: 'admin@test.local', password, ...solvedMath() }) }), db);
         const cookie = login.headers.get('set-cookie')!.split(';')[0];
         const invalid = await req('/api/cep/123', cookie);
         assert.equal(invalid.status, 400);

@@ -1,11 +1,24 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { DEFAULT_PUBLIC_CONTACT, formatBrPhone, socialHandle, whatsappLink, type PublicContact } from '../shared/contact';
+import { copyrightLine } from '../shared/brand';
 
-const CONTACTS = [
-    { label: '(11) 95629-2968', value: '5511956292968' },
-    { label: '(11) 96615-0912', value: '5511966150912' }
-];
+function stagger(index: number): CSSProperties {
+    return { '--i': index } as CSSProperties;
+}
+
+function InstagramIcon() {
+    return <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>;
+}
+
+function FacebookIcon() {
+    return <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M13.5 22v-8h2.7l.4-3.2h-3.1V8.8c0-.9.3-1.6 1.6-1.6h1.7V4.4c-.3 0-1.3-.1-2.5-.1-2.5 0-4.1 1.5-4.1 4.2v2.3H7.4V14h2.8v8h3.3z"/></svg>;
+}
+
+function WhatsAppIcon() {
+    return <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3.1 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 2-1.4.2-.7.2-1.3.1-1.4l-1.9-.9c-.3-.1-.5-.2-.7.1l-.9 1.2c-.2.2-.3.2-.6.1a6.6 6.6 0 0 1-3.3-2.9c-.2-.4.2-.4.6-1.1.1-.1 0-.3 0-.5l-.9-2c-.2-.5-.4-.4-.6-.4h-.5z"/></svg>;
+}
 
 const SERVICE_LABELS = {
     RENTAL: 'Alugar caçamba',
@@ -56,7 +69,10 @@ function cepMask(value: string): string {
     return n.length > 5 ? `${n.slice(0, 5)}-${n.slice(5)}` : n;
 }
 
-export function PublicBooking() {
+export function PublicBooking({ contact = DEFAULT_PUBLIC_CONTACT }: { contact?: PublicContact }) {
+    // Contatos configurados pelo administrador (Configurações → Contato e redes sociais).
+    const CONTACTS = contact.whatsapp.map(value => ({ label: formatBrPhone(value), value }));
+    const mainWhatsapp = CONTACTS[0]?.value ?? DEFAULT_PUBLIC_CONTACT.whatsapp[0];
     const [serviceType, setServiceType] = useState<keyof typeof SERVICE_LABELS>('RENTAL');
     const [phone, setPhone] = useState('');
     const [postalCode, setPostalCode] = useState('');
@@ -94,6 +110,26 @@ export function PublicBooking() {
     }
 
     useEffect(() => { void loadCaptcha(); }, []);
+
+    const siteRef = useRef<HTMLElement>(null);
+    useEffect(() => {
+        const root = siteRef.current;
+        if (!root) return;
+        const items = Array.from(root.querySelectorAll<HTMLElement>('[data-reveal]'));
+        if (!('IntersectionObserver' in window)) {
+            items.forEach(item => item.classList.add('is-visible'));
+            return;
+        }
+        const observer = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                entry.target.classList.add('is-visible');
+                observer.unobserve(entry.target);
+            }
+        }, { threshold: 0.15, rootMargin: '0px 0px -6% 0px' });
+        items.forEach(item => observer.observe(item));
+        return () => observer.disconnect();
+    }, []);
 
     async function lookupCep(value: string) {
         const cep = digits(value);
@@ -175,10 +211,10 @@ export function PublicBooking() {
     }
 
     const whatsappText = result
-        ? encodeURIComponent(`Olá! Enviei uma solicitação pelo site da JR Caçambas. Protocolo: ${result.protocol}.`)
-        : '';
+        ? `Olá! Enviei uma solicitação pelo site da ${contact.companyName}. Protocolo: ${result.protocol}.`
+        : undefined;
 
-    return <main className="public-site">
+    return <main className="public-site" ref={siteRef}>
         <header className="public-header">
             <a className="public-brand" href="#inicio" aria-label="JR Caçambas - início">
                 <span>JR</span><strong>JR CAÇAMBAS</strong>
@@ -189,7 +225,12 @@ export function PublicBooking() {
                 <a href="#atendimento">Área de atendimento</a>
                 <a href="#duvidas">Dúvidas</a>
             </nav>
-            <a className="public-header-cta" href="#solicitar">Solicitar caçamba</a>
+            <div className="public-header-actions">
+                {contact.instagram && <a className="public-social instagram" href={contact.instagram} target="_blank" rel="noreferrer" aria-label={`Instagram ${socialHandle(contact.instagram)}`} title={`Instagram ${socialHandle(contact.instagram)}`}><InstagramIcon/></a>}
+                {contact.facebook && <a className="public-social facebook" href={contact.facebook} target="_blank" rel="noreferrer" aria-label="Facebook" title={`Facebook ${socialHandle(contact.facebook)}`}><FacebookIcon/></a>}
+                <a className="public-social whatsapp" href={whatsappLink(mainWhatsapp)} target="_blank" rel="noreferrer" aria-label={`WhatsApp ${formatBrPhone(mainWhatsapp)}`} title={`WhatsApp ${formatBrPhone(mainWhatsapp)}`}><WhatsAppIcon/><span>WhatsApp</span></a>
+                <a className="public-header-cta" href="#solicitar">Solicitar caçamba</a>
+            </div>
         </header>
 
         <section className="public-hero" id="inicio">
@@ -199,7 +240,7 @@ export function PublicBooking() {
                 <p>Solicite entrega, troca ou retirada pela internet. Nossa equipe confere a disponibilidade e combina os detalhes diretamente com você.</p>
                 <div className="public-hero-actions">
                     <a className="public-button primary" href="#solicitar">Fazer uma solicitação <span>→</span></a>
-                    <a className="public-button quiet" href={`https://wa.me/${CONTACTS[0].value}`} target="_blank" rel="noreferrer">Falar no WhatsApp</a>
+                    <a className="public-button quiet" href={whatsappLink(mainWhatsapp)} target="_blank" rel="noreferrer">Falar no WhatsApp</a>
                 </div>
                 <ul className="public-proof">
                     <li><b>✓</b><span><strong>Atendimento local</strong><small>Conhecemos a região</small></span></li>
@@ -219,26 +260,28 @@ export function PublicBooking() {
         </section>
 
         <section className="public-steps" id="como-funciona">
-            <div className="public-section-heading"><span>PROCESSO SIMPLES</span><h2>Você solicita. A gente organiza.</h2><p>O pedido entra na nossa fila operacional e só vira agendamento depois da confirmação.</p></div>
+            <div className="public-section-heading" data-reveal><span>PROCESSO SIMPLES</span><h2>Você solicita. A gente organiza.</h2><p>O pedido entra na nossa fila operacional e só vira agendamento depois da confirmação.</p></div>
             <div className="public-step-grid">
-                <article><b>01</b><div className="public-step-icon">⌖</div><h3>Informe o local</h3><p>Preencha o endereço da obra e o tipo de resíduo.</p></article>
-                <article><b>02</b><div className="public-step-icon">◷</div><h3>Escolha uma preferência</h3><p>Indique a melhor data e período para atendimento.</p></article>
-                <article><b>03</b><div className="public-step-icon">✓</div><h3>Aguarde a confirmação</h3><p>Nossa equipe retorna com disponibilidade, valor e horário.</p></article>
+                <article data-reveal style={stagger(0)}><b>01</b><div className="public-step-icon">⌖</div><h3>Informe o local</h3><p>Preencha o endereço da obra e o tipo de resíduo.</p></article>
+                <article data-reveal style={stagger(1)}><b>02</b><div className="public-step-icon">◷</div><h3>Escolha uma preferência</h3><p>Indique a melhor data e período para atendimento.</p></article>
+                <article data-reveal style={stagger(2)}><b>03</b><div className="public-step-icon">✓</div><h3>Aguarde a confirmação</h3><p>Nossa equipe retorna com disponibilidade, valor e horário.</p></article>
             </div>
         </section>
 
         <section className="public-booking-zone" id="solicitar">
-            <div className="public-booking-intro">
+            <div className="public-booking-intro" data-reveal>
                 <span className="public-kicker light"><i/>SOLICITAÇÃO ONLINE</span>
                 <h2>Conte o que você precisa.</h2>
                 <p>Leva menos de dois minutos. O envio não gera cobrança e não confirma automaticamente a reserva.</p>
                 <div className="public-contact-block">
                     <small>Prefere falar com a equipe?</small>
-                    {CONTACTS.map(contact => <a key={contact.value} href={`https://wa.me/${contact.value}`} target="_blank" rel="noreferrer"><span>WhatsApp</span><strong>{contact.label}</strong></a>)}
+                    {CONTACTS.map(c => <a key={c.value} href={whatsappLink(c.value)} target="_blank" rel="noreferrer"><span>WhatsApp</span><strong>{c.label}</strong></a>)}
+                    {contact.instagram && <a href={contact.instagram} target="_blank" rel="noreferrer"><span>Instagram</span><strong>{socialHandle(contact.instagram)}</strong></a>}
+                    {contact.facebook && <a href={contact.facebook} target="_blank" rel="noreferrer"><span>Facebook</span><strong>{socialHandle(contact.facebook)}</strong></a>}
                 </div>
                 <address>Rua Agelina, 424<br/>Jardim Record · Taboão da Serra/SP</address>
             </div>
-            <div className="public-form-card">
+            <div className="public-form-card" data-reveal style={stagger(1)}>
                 {result ? <div className="public-success" role="status">
                     <div className="public-success-icon">✓</div>
                     <span>SOLICITAÇÃO RECEBIDA</span>
@@ -247,7 +290,7 @@ export function PublicBooking() {
                     <div className="public-protocol"><small>Seu protocolo</small><strong>{result.protocol}</strong></div>
                     <p className="public-success-note">Guarde esse número. Depois, consulte o andamento com o mesmo e-mail e telefone.</p>
                     <div className="public-success-actions">
-                        <a className="public-button primary" href={`https://wa.me/${CONTACTS[0].value}?text=${whatsappText}`} target="_blank" rel="noreferrer">Continuar no WhatsApp</a>
+                        <a className="public-button primary" href={whatsappLink(mainWhatsapp, whatsappText)} target="_blank" rel="noreferrer">Continuar no WhatsApp</a>
                         <button className="public-link-button" onClick={() => setResult(null)}>Fazer outra solicitação</button>
                     </div>
                 </div> : <form onSubmit={submit}>
@@ -301,15 +344,16 @@ export function PublicBooking() {
         </section>
 
         <section className="public-track" id="acompanhar">
-            <div className="public-section-heading">
+            <div className="public-section-heading" data-reveal>
                 <span>ACOMPANHAMENTO</span>
                 <h2>Como está o seu pedido?</h2>
                 <p>Use o número do pedido ou o mesmo e-mail e celular da solicitação. Mostramos só o andamento, sem dados internos da equipe.</p>
             </div>
-            <div className="public-track-modes" role="tablist" aria-label="Forma de consulta">
+            <div className="public-track-modes" role="tablist" aria-label="Forma de consulta" data-reveal style={stagger(1)}>
                 <button type="button" role="tab" aria-selected={trackMode === 'protocol'} className={trackMode === 'protocol' ? 'selected' : ''} onClick={() => { setTrackMode('protocol'); setTracked(null); setTrackError(''); }}>Número do pedido</button>
                 <button type="button" role="tab" aria-selected={trackMode === 'contact'} className={trackMode === 'contact' ? 'selected' : ''} onClick={() => { setTrackMode('contact'); setTracked(null); setTrackError(''); }}>E-mail e celular</button>
             </div>
+            <div data-reveal style={stagger(2)}>
             <form className={`public-track-form${trackMode === 'protocol' ? ' protocol' : ''}`} onSubmit={track}>
                 {trackMode === 'protocol'
                     ? <label><span>Número do pedido</span><input required autoCapitalize="characters" spellCheck={false} maxLength={24} value={trackProtocol} onChange={event => setTrackProtocol(event.target.value.toUpperCase())} placeholder="JR-20260928-AB12CD"/></label>
@@ -317,6 +361,7 @@ export function PublicBooking() {
                         <label><span>WhatsApp / telefone</span><input required inputMode="tel" autoComplete="tel" value={trackPhone} onChange={event => setTrackPhone(phoneMask(event.target.value))} placeholder="(11) 99999-9999"/></label></>}
                 <button className="public-button primary" type="submit" disabled={trackBusy}>{trackBusy ? 'Consultando...' : 'Consultar andamento'}</button>
             </form>
+            </div>
             {trackError && <div className="public-form-error public-track-feedback" role="alert">{trackError}</div>}
             {tracked && (tracked.length ? <div className="public-track-list">{tracked.map(request =>
                 <article key={request.protocol} className={`public-track-card status-${request.status.toLowerCase()}`}>
@@ -329,8 +374,8 @@ export function PublicBooking() {
         </section>
 
         <section className="public-coverage" id="atendimento">
-            <div><span>ATENDIMENTO REGIONAL</span><h2>Perto de você,<br/>perto da sua obra.</h2><p>Nosso pátio fica no Jardim Record, em Taboão da Serra. Atendemos Taboão da Serra, Embu das Artes e localidades próximas mediante consulta de rota.</p><a href="#solicitar">Consultar meu endereço →</a></div>
-            <div className="public-coverage-map">
+            <div data-reveal><span>ATENDIMENTO REGIONAL</span><h2>Perto de você,<br/>perto da sua obra.</h2><p>Nosso pátio fica no Jardim Record, em Taboão da Serra. Atendemos Taboão da Serra, Embu das Artes e localidades próximas mediante consulta de rota.</p><a href="#solicitar">Consultar meu endereço →</a></div>
+            <div className="public-coverage-map" data-reveal style={stagger(1)}>
                 <i className="road one"/><i className="road two"/><i className="road three"/>
                 <span className="map-place taboao"><b/>Taboão da Serra</span>
                 <span className="map-place embu"><b/>Embu das Artes</span>
@@ -339,20 +384,25 @@ export function PublicBooking() {
         </section>
 
         <section className="public-faq" id="duvidas">
-            <div className="public-section-heading"><span>ANTES DE SOLICITAR</span><h2>Dúvidas frequentes</h2></div>
+            <div className="public-section-heading" data-reveal><span>ANTES DE SOLICITAR</span><h2>Dúvidas frequentes</h2></div>
             <div className="public-faq-grid">
-                <details><summary>A solicitação já reserva a caçamba?</summary><p>Não. Primeiro conferimos disponibilidade, endereço, tipo de resíduo e rota. A reserva só fica confirmada após nosso contato.</p></details>
-                <details><summary>Quais cidades vocês atendem?</summary><p>Taboão da Serra, Embu das Artes e região. Endereços fora dessa área passam por consulta antes da confirmação.</p></details>
-                <details><summary>Posso pedir troca ou retirada?</summary><p>Sim. Escolha “Trocar caçamba” ou “Solicitar retirada” no formulário e informe o endereço onde ela está.</p></details>
-                <details><summary>Posso descartar qualquer material?</summary><p>Não. Informe corretamente o resíduo para que a equipe confirme se ele pode ser transportado e qual destinação será necessária.</p></details>
+                <details data-reveal style={stagger(0)}><summary>A solicitação já reserva a caçamba?</summary><p>Não. Primeiro conferimos disponibilidade, endereço, tipo de resíduo e rota. A reserva só fica confirmada após nosso contato.</p></details>
+                <details data-reveal style={stagger(1)}><summary>Quais cidades vocês atendem?</summary><p>Taboão da Serra, Embu das Artes e região. Endereços fora dessa área passam por consulta antes da confirmação.</p></details>
+                <details data-reveal style={stagger(2)}><summary>Posso pedir troca ou retirada?</summary><p>Sim. Escolha “Trocar caçamba” ou “Solicitar retirada” no formulário e informe o endereço onde ela está.</p></details>
+                <details data-reveal style={stagger(3)}><summary>Posso descartar qualquer material?</summary><p>Não. Informe corretamente o resíduo para que a equipe confirme se ele pode ser transportado e qual destinação será necessária.</p></details>
             </div>
         </section>
 
-        <footer className="public-footer">
+        <footer className="public-footer" data-reveal>
             <a className="public-brand inverse" href="#inicio"><span>JR</span><strong>JR CAÇAMBAS</strong></a>
             <p>Solicitação de caçambas em Taboão da Serra, Embu das Artes e região.</p>
-            <div>{CONTACTS.map(contact => <a key={contact.value} href={`https://wa.me/${contact.value}`} target="_blank" rel="noreferrer">{contact.label}</a>)}</div>
+            <div>
+                {CONTACTS.map(c => <a key={c.value} href={whatsappLink(c.value)} target="_blank" rel="noreferrer">{c.label}</a>)}
+                {contact.instagram && <a href={contact.instagram} target="_blank" rel="noreferrer">Instagram {socialHandle(contact.instagram)}</a>}
+                {contact.facebook && <a href={contact.facebook} target="_blank" rel="noreferrer">Facebook</a>}
+            </div>
             <small>Rua Agelina, 424 · Jardim Record · Taboão da Serra/SP</small>
+            <small className="public-copyright">{copyrightLine()}</small>
         </footer>
     </main>;
 }

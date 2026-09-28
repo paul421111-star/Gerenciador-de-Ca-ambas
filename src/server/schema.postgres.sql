@@ -4,12 +4,14 @@ CREATE TABLE IF NOT EXISTS drivers (
  licenseExpiry TEXT, active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)), createdAt TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS users (
- id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, passwordHash TEXT NOT NULL,
+ id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, username TEXT, passwordHash TEXT NOT NULL,
  role TEXT NOT NULL CHECK(role IN ('ADMIN','DISPATCHER','DRIVER')), driverId TEXT UNIQUE REFERENCES drivers(id),
  active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)), createdAt TEXT NOT NULL,
  CHECK((role='DRIVER' AND driverId IS NOT NULL) OR (role!='DRIVER' AND driverId IS NULL))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username)) WHERE username IS NOT NULL;
 CREATE TABLE IF NOT EXISTS sessions (tokenHash TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expiresAt TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_session_expiry ON sessions(expiresAt);
 CREATE TABLE IF NOT EXISTS loginAttempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, updatedAt TEXT NOT NULL, blockedUntil TEXT);

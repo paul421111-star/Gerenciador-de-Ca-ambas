@@ -6,7 +6,9 @@ import { AppError } from '../src/server/errors.ts';
 import { handleApi } from '../src/server/api.ts';
 import { openDatabase } from '../src/server/db.ts';
 import { seed } from '../src/server/seed.ts';
+import { createMathCaptcha } from '../src/server/captcha.ts';
 const password = 'Private-test-admin-password!';
+const solvedMath = () => { const c = createMathCaptcha(); return { captchaId: c.id, captchaAnswer: c.answer }; };
 const BB = '00000000000191';
 test('document helpers normalize, format and detect CPF/CNPJ fields', () => {
     assert.equal(digitsDocument('11.222.333/0001-81'), '11222333000181');
@@ -57,7 +59,7 @@ test('API cnpj route requires a session and validates the company document', asy
     const req = (path: string, cookie?: string) => handleApi(new Request('http://localhost:3000' + path, { headers: { origin: 'http://localhost:3000', ...(cookie ? { cookie } : {}) } }), db);
     try {
         assert.equal((await req('/api/cnpj/' + BB)).status, 401);
-        const login = await handleApi(new Request('http://localhost:3000/api/login', { method: 'POST', headers: { origin: 'http://localhost:3000', 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin@test.local', password }) }), db);
+        const login = await handleApi(new Request('http://localhost:3000/api/login', { method: 'POST', headers: { origin: 'http://localhost:3000', 'content-type': 'application/json' }, body: JSON.stringify({ login: 'admin@test.local', password, ...solvedMath() }) }), db);
         const cookie = login.headers.get('set-cookie')!.split(';')[0];
         const invalid = await req('/api/cnpj/123', cookie);
         assert.equal(invalid.status, 400);

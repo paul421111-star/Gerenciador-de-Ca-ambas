@@ -1,4 +1,5 @@
 import { assert } from './errors.ts';
+import { USERNAME_HINT, isValidUsername, normalizeUsername } from '../shared/username.ts';
 export function object(value: unknown): Record<string, unknown> {
     assert(value !== null && typeof value === 'object' && !Array.isArray(value), 'Dados da operação inválidos.');
     return value as Record<string, unknown>;
@@ -28,6 +29,20 @@ export function choice<T extends string>(p: Record<string, unknown>, key: string
 export function email(p: Record<string, unknown>, key: string, required = false): string {
     const s = str(p, key, required ? 3 : 0, 254).toLowerCase();
     assert(!s || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s), 'Informe um e-mail válido.');
+    return s;
+}
+/** Nome de usuário opcional (normalizado em minúsculas). Retorna '' quando vazio. */
+export function username(p: Record<string, unknown>, key: string, required = false): string {
+    const s = normalizeUsername(str(p, key, 0, 40));
+    assert((!required && !s) || isValidUsername(s), `Nome de usuário inválido. ${USERNAME_HINT}`);
+    return s;
+}
+/** Identificador de login: e-mail (contém @) ou nome de usuário. */
+export function loginIdentifier(p: Record<string, unknown>, key: string): string {
+    const s = str(p, key, 1, 254).toLowerCase();
+    if (s.includes('@'))
+        return email({ [key]: s }, key, true);
+    assert(isValidUsername(s), 'Informe seu nome de usuário ou e-mail.');
     return s;
 }
 export function phone(p: Record<string, unknown>, key: string, required = true): string {

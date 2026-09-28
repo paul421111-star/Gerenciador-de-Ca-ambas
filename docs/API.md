@@ -5,7 +5,8 @@ A API está na mesma origem da interface e é servida por Next Route Handlers em
 | Método / rota | Finalidade |
 |---|---|
 | GET `/api/health` | Resposta pública de disponibilidade HTTP |
-| POST `/api/login` | Autentica e define a cookie de sessão |
+| GET `/api/login/captcha` | Gera a conta de verificação do login (`{ id, question }`, ex.: `"4 + 6"`; válida por 10 min e de uso único) |
+| POST `/api/login` | Autentica com `login` (usuário ou e-mail), `password`, `captchaId` e `captchaAnswer`; define a cookie de sessão |
 | GET `/api/snapshot` | Retorna os dados permitidos para a conta autenticada |
 | POST `/api/command` | Executa um comando transacional autorizado |
 | POST `/api/logout` | Revoga a sessão e limpa a cookie |

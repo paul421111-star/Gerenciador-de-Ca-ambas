@@ -38,7 +38,9 @@ const GLYPHS: Record<string, string[]> = {
     '9': ['01110', '10001', '10001', '01111', '00001', '00001', '01110']
 };
 
+type ChallengeKind = 'IMAGE' | 'MATH';
 interface Challenge {
+    kind: ChallengeKind;
     answer: string;
     expires: number;
 }
@@ -70,13 +72,18 @@ export interface CaptchaChallenge {
     answer: string;
 }
 
-export function createCaptcha(at = new Date()): CaptchaChallenge {
+function remember(kind: ChallengeKind, answer: string, at: Date): string {
     const now = at.getTime();
     for (const [id, challenge] of challenges)
         if (challenge.expires <= now) challenges.delete(id);
-    const answer = code();
     const id = randomUUID();
-    challenges.set(id, { answer, expires: now + TTL_MS });
+    challenges.set(id, { kind, answer, expires: now + TTL_MS });
+    return id;
+}
+
+export function createCaptcha(at = new Date()): CaptchaChallenge {
+    const answer = code();
+    const id = remember('IMAGE', answer, at);
     return { id, image: image(answer), answer };
 }
 
@@ -85,9 +92,34 @@ export function publicCaptcha(at = new Date()): { id: string; image: string } {
     return { id, image: picture };
 }
 
-export function verifyCaptcha(id: string, answer: string, at = new Date()): void {
+export interface MathCaptchaChallenge {
+    id: string;
+    question: string;
+    answer: string;
+}
+
+/** Conta simples (soma ou subtração, alternadas ao acaso) para a tela de login. O resultado nunca é negativo. */
+export function createMathCaptcha(at = new Date()): MathCaptchaChallenge {
+    const subtract = randomInt(2) === 1;
+    let a = randomInt(1, 10), b = randomInt(1, 10);
+    if (subtract && b > a)
+        [a, b] = [b, a];
+    const answer = String(subtract ? a - b : a + b);
+    const id = remember('MATH', answer, at);
+    return { id, question: `${a} ${subtract ? '−' : '+'} ${b}`, answer };
+}
+
+export function publicMathCaptcha(at = new Date()): { id: string; question: string } {
+    const { id, question } = createMathCaptcha(at);
+    return { id, question };
+}
+
+export function verifyCaptcha(id: string, answer: string, at = new Date(), kind: ChallengeKind = 'IMAGE'): void {
     const challenge = challenges.get(id);
     challenges.delete(id);
     const normalized = answer.trim().toUpperCase().replace(/\s/g, '');
-    assert(challenge && challenge.expires > at.getTime() && challenge.answer === normalized, 'O código da imagem não confere. Gere outro e tente de novo.', 400);
+    const message = kind === 'MATH'
+        ? 'O resultado da conta não confere. Confira a soma ou subtração e tente de novo.'
+        : 'O código da imagem não confere. Gere outro e tente de novo.';
+    assert(challenge && challenge.kind === kind && challenge.expires > at.getTime() && challenge.answer === normalized, message, 400);
 }

@@ -3,13 +3,13 @@ import { type DB, database, row } from './db.ts';
 import { authenticate, sessionUser, revokeSession } from './auth.ts';
 import { execute, snapshot, rentalSignaturesFor } from './service.ts';
 import { assert, AppError, unavailableDatabase } from './errors.ts';
-import { object, secret, email } from './validate.ts';
+import { object, secret, str, loginIdentifier } from './validate.ts';
 import { cookieToken, sessionCookie, sameOrigin, readJson, json, errorResponse } from './http.ts';
 import { lookupCep } from './cep.ts';
 import { lookupCnpj } from './cnpj.ts';
 import { geocodePayload, lookupGeocode } from './geocode.ts';
 import { createPublicBooking, lookupPublicBookings } from './booking.ts';
-import { publicCaptcha } from './captcha.ts';
+import { publicCaptcha, publicMathCaptcha, verifyCaptcha } from './captcha.ts';
 /** Shared Web API handler: exercised directly by tests and exposed through Next Route Handlers. */
 export async function handleApi(request: Request, providedDB?: DB): Promise<Response> {
     const requestId = request.headers.get('x-request-id')?.trim() || randomUUID();
@@ -38,6 +38,8 @@ export async function handleApi(request: Request, providedDB?: DB): Promise<Resp
             sameOrigin(request);
         if (request.method === 'GET' && path === '/api/public/captcha')
             return json(publicCaptcha());
+        if (request.method === 'GET' && path === '/api/login/captcha')
+            return json(publicMathCaptcha());
         if (request.method === 'GET' && path.startsWith('/api/public/cep/'))
             return json(await lookupCep(path.slice('/api/public/cep/'.length)));
         const db = providedDB ?? await database();
@@ -50,7 +52,10 @@ export async function handleApi(request: Request, providedDB?: DB): Promise<Resp
                 n: number | string;
             }>(db, 'SELECT COUNT(*) AS n FROM users'))?.n ?? 0) > 0, 'Sistema não inicializado. Execute npm run setup no servidor.', 503);
             const p = object(await readJson(request, 4096));
-            const result = await authenticate(db, email(p, 'email', true), secret(p, 'password', 1, 128));
+            // Conta simples (ex.: 4 + 6) antes de tocar nas credenciais; `email` continua aceito por compatibilidade.
+            verifyCaptcha(str(p, 'captchaId', 0, 64), str(p, 'captchaAnswer', 0, 8), new Date(), 'MATH');
+            const login = loginIdentifier({ login: p.login ?? p.email }, 'login');
+            const result = await authenticate(db, login, secret(p, 'password', 1, 128));
             return json({ user: result.user }, 200, { 'Set-Cookie': sessionCookie(result.token) });
         }
         const token = cookieToken(request), user = await sessionUser(db, token);

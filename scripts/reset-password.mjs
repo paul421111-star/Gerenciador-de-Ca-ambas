@@ -2,8 +2,8 @@ import {loadEnv} from './env.mjs';import {ask,askPassword} from './prompt.mjs';i
 let db;try{
  loadEnv();
  db=usesPostgres()?await openPostgres():openDatabase(databasePath());
- const email=(process.env.JR_ADMIN_EMAIL||await ask('E-mail da conta a recuperar')).toLowerCase();
- const user=await row(db,'SELECT id FROM users WHERE email=?',email);
+ const login=(process.env.JR_ADMIN_EMAIL||await ask('E-mail ou usuário da conta a recuperar')).trim().toLowerCase();
+ const user=await row(db,login.includes('@')?'SELECT id FROM users WHERE LOWER(email)=?':'SELECT id FROM users WHERE LOWER(username)=?',login);
  if(!user)throw new Error('Conta não encontrada.');
  const password=process.env.JR_ADMIN_PASSWORD||await askPassword('Nova senha (mínimo 12 caracteres)');
  const hash=hashPassword(password);

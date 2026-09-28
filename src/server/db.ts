@@ -6,6 +6,7 @@ import postgres, { type Sql } from 'postgres';
 import { SCHEMA } from './schema.ts';
 import { POSTGRES_SCHEMA } from './schema.postgres.ts';
 import type { Settings } from '../shared/types.ts';
+import { usernameFromEmail } from '../shared/username.ts';
 
 export type SqlValue = string | number | bigint | boolean | null | Uint8Array | undefined;
 export type Dialect = 'sqlite' | 'postgres';
@@ -25,7 +26,7 @@ export interface DB {
     close(): Promise<void> | void;
 }
 
-export const DEFAULT_SETTINGS: Settings = { companyName: 'JR Caçambas', companyPhone: '', yardAddress: '', defaultDays: 7, defaultPriceCents: 0, jobDurationMinutes: 60, demo: false, timezone: 'America/Sao_Paulo' };
+export const DEFAULT_SETTINGS: Settings = { companyName: 'JR Caçambas', companyPhone: '', whatsappNumbers: [], instagramUrl: '', facebookUrl: '', yardAddress: '', defaultDays: 7, defaultPriceCents: 0, jobDurationMinutes: 60, demo: false, timezone: 'America/Sao_Paulo' };
 export const usesPostgres = () => Boolean(process.env.DATABASE_URL?.trim()) && process.env.JR_FORCE_SQLITE !== '1';
 export const databasePath = () => resolve(process.env.DATABASE_PATH || './data/jr.sqlite');
 export const postgresUrl = () => process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL || '';
@@ -188,6 +189,32 @@ function migrateSqlite(db: DatabaseSync): void {
 )`);
     db.exec('CREATE INDEX IF NOT EXISTS idx_rental_signature_revisions ON rentalSignatureRevisions(rentalId, kind, replacedAt)');
     db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(6,?)').run(new Date().toISOString());
+    // 8: login por nome de usuário (além do e-mail). Contas antigas ganham o apelido derivado do e-mail quando ele está livre.
+    const userColumns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+    if (!userColumns.some(column => column.name === 'username'))
+        db.exec('ALTER TABLE users ADD COLUMN username TEXT');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE) WHERE username IS NOT NULL');
+    const accounts = db.prepare('SELECT id,email,username FROM users').all() as { id: string; email: string; username: string | null }[];
+    const update = db.prepare('UPDATE users SET username=? WHERE id=?');
+    for (const [id, username] of suggestUsernames(accounts))
+        update.run(username, id);
+    db.prepare('INSERT OR IGNORE INTO migrations(version,appliedAt) VALUES(8,?)').run(new Date().toISOString());
+}
+
+/** Escolhe apelidos únicos para contas sem username, a partir da parte local do e-mail. */
+function suggestUsernames(accounts: { id: string; email: string; username: string | null }[]): [string, string][] {
+    const taken = new Set(accounts.flatMap(a => a.username ? [a.username.toLowerCase()] : []));
+    const chosen: [string, string][] = [];
+    for (const account of accounts) {
+        if (account.username)
+            continue;
+        const candidate = usernameFromEmail(account.email);
+        if (!candidate || taken.has(candidate))
+            continue;
+        taken.add(candidate);
+        chosen.push([account.id, candidate]);
+    }
+    return chosen;
 }
 
 function sqlitePickupNotNull(db: DatabaseSync): boolean {
@@ -292,6 +319,13 @@ async function migratePostgres(db: DB): Promise<void> {
     }
     await db.run('INSERT INTO migrations(version,appliedAt) VALUES(?,?) ON CONFLICT(version) DO NOTHING', 6, now);
     await db.run('INSERT INTO migrations(version,appliedAt) VALUES(?,?) ON CONFLICT(version) DO NOTHING', 7, now);
+    // 8: login por nome de usuário (além do e-mail).
+    await db.exec('ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT');
+    await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username)) WHERE username IS NOT NULL');
+    const accounts = await db.rows<{ id: string; email: string; username: string | null }>('SELECT id,email,username FROM users');
+    for (const [id, username] of suggestUsernames(accounts))
+        await db.run('UPDATE users SET username=? WHERE id=?', username, id);
+    await db.run('INSERT INTO migrations(version,appliedAt) VALUES(?,?) ON CONFLICT(version) DO NOTHING', 8, now);
 }
 
 export async function openPostgres(url = postgresUrl()): Promise<DB> {

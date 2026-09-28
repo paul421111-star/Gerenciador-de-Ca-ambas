@@ -4,13 +4,40 @@ import { randomUUID } from 'node:crypto';
 import { openDatabase, row, usesPostgres } from '../src/server/db.ts';
 import { seed } from '../src/server/seed.ts';
 import { handleApi } from '../src/server/api.ts';
-import { createCaptcha } from '../src/server/captcha.ts';
+import { createCaptcha, createMathCaptcha } from '../src/server/captcha.ts';
 const password = 'Private-test-admin-password!';
 function solved<T extends Record<string, unknown>>(payload: T) {
     const captcha = createCaptcha();
     return { ...payload, captchaId: captcha.id, captchaAnswer: captcha.answer };
 }
-async function fixture() { const db = openDatabase(':memory:'); await seed(db, { email: 'admin@test.local', password }); const req = (path: string, method = 'GET', body?: unknown, cookie?: string, headers: Record<string, string> = {}) => handleApi(new Request('http://localhost:3000' + path, { method, headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), db); return { db, req, login: async () => { const r = await req('/api/login', 'POST', { email: 'admin@test.local', password }); assert.equal(r.status, 200); return r.headers.get('set-cookie')!.split(';')[0]; } }; }
+/** Login payload with the math captcha already solved (the login screen does the same through /api/login/captcha). */
+export function credentials(login: string, pass: string) {
+    const captcha = createMathCaptcha();
+    return { login, password: pass, captchaId: captcha.id, captchaAnswer: captcha.answer };
+}
+async function fixture() { const db = openDatabase(':memory:'); await seed(db, { email: 'admin@test.local', password }); const req = (path: string, method = 'GET', body?: unknown, cookie?: string, headers: Record<string, string> = {}) => handleApi(new Request('http://localhost:3000' + path, { method, headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), db); return { db, req, login: async () => { const r = await req('/api/login', 'POST', credentials('admin@test.local', password)); assert.equal(r.status, 200); return r.headers.get('set-cookie')!.split(';')[0]; } }; }
+test('login accepts username or e-mail, requires the math captcha and rejects a reused challenge', async () => { const f = await fixture(); try {
+    assert.equal((await f.req('/api/login', 'POST', { email: 'admin@test.local', password })).status, 400);
+    const challenge = await f.req('/api/login/captcha');
+    assert.equal(challenge.status, 200);
+    const body = await challenge.json() as { id: string; question: string };
+    assert.match(body.question, /^\d+ [+−] \d+$/);
+    const [a, op, b] = body.question.split(' ');
+    const answer = op === '+' ? Number(a) + Number(b) : Number(a) - Number(b);
+    assert.ok(answer >= 0);
+    const wrong = await f.req('/api/login', 'POST', { login: 'admin', password, captchaId: body.id, captchaAnswer: String(answer + 1) });
+    assert.equal(wrong.status, 400);
+    // A failed attempt consumes the challenge: the right answer no longer works with the same id.
+    assert.equal((await f.req('/api/login', 'POST', { login: 'admin', password, captchaId: body.id, captchaAnswer: String(answer) })).status, 400);
+    const byUsername = await f.req('/api/login', 'POST', credentials(' Admin ', password));
+    assert.equal(byUsername.status, 200);
+    assert.equal(((await byUsername.json()) as { user: { username: string } }).user.username, 'admin');
+    assert.equal((await f.req('/api/login', 'POST', credentials('ADMIN@test.local', password))).status, 200);
+    assert.equal((await f.req('/api/login', 'POST', credentials('someone-else', password))).status, 401);
+}
+finally {
+    f.db.close();
+} });
 test('API rejects anonymous access and never returns a password hash', async () => { const f = await fixture(); try {
     assert.equal((await f.req('/api/snapshot')).status, 401);
     const c = await f.login(), r = await f.req('/api/snapshot', 'GET', undefined, c);
@@ -208,13 +235,13 @@ test('API preserves leading and trailing spaces in passwords during login and ro
     await seed(db, { email: 'spaces@test.local', password: original });
     const req = (path: string, body: unknown, cookie?: string) => handleApi(new Request('http://localhost:3000' + path, { method: 'POST', headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', 'idempotency-key': randomUUID(), ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) }), db);
     try {
-        const login = await req('/api/login', { email: 'spaces@test.local', password: original });
+        const login = await req('/api/login', credentials('spaces@test.local', original));
         assert.equal(login.status, 200);
         const cookie = login.headers.get('set-cookie')!.split(';')[0];
         const change = await req('/api/command', { action: 'changePassword', payload: { currentPassword: original, newPassword: next } }, cookie);
         assert.equal(change.status, 200);
-        assert.equal((await req('/api/login', { email: 'spaces@test.local', password: next })).status, 200);
-        assert.equal((await req('/api/login', { email: 'spaces@test.local', password: next.trim() })).status, 401);
+        assert.equal((await req('/api/login', credentials('spaces@test.local', next))).status, 200);
+        assert.equal((await req('/api/login', credentials('spaces@test.local', next.trim()))).status, 401);
     }
     finally {
         db.close();

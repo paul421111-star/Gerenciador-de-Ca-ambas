@@ -8,11 +8,12 @@ import { spawn } from 'node:child_process';
 import { openDatabase, row, rows, settings, DEFAULT_SETTINGS } from '../src/server/db.ts';
 import { execute, snapshot, checkSlot, rentalSignaturesFor } from '../src/server/service.ts';
 import { seed } from '../src/server/seed.ts';
-import { hashPassword, verifyPassword, authenticate, sessionUser, sha256 } from '../src/server/auth.ts';
+import { hashPassword, verifyPassword, authenticate, sessionUser, sha256, createAccount } from '../src/server/auth.ts';
 import { AppError } from '../src/server/errors.ts';
 import { fromLocalInput, toLocalInput, dateKey, csvCell } from '../src/shared/format.ts';
 import type { User, Rental, Job, Container, CommandName } from '../src/shared/types.ts';
 import { SAMPLE_SIGNATURE_PNG } from '../src/shared/signature.ts';
+import { DEFAULT_WHATSAPP, formatBrPhone, publicContactFrom, socialHandle, whatsappLink } from '../src/shared/contact.ts';
 const NOW = '2026-09-15T10:00:00.000Z', DELIVERY = '2026-09-16T11:00:00.000Z', PICKUP = '2026-09-23T11:00:00.000Z';
 const PASSWORD = 'Private-test-password-456!';
 const HASH = hashPassword(PASSWORD);
@@ -532,6 +533,47 @@ test('login creates opaque hashed sessions; deactivation revokes them', async ()
     const second = await authenticate(f.db, 'user1@test.local', PASSWORD);
     await f.run('setUserActive', { id: 'user1', active: 0 });
     assert.equal(await sessionUser(f.db, second.token), null);
+}
+finally {
+    f.close();
+} });
+test('accounts get a login username (explicit or derived from the e-mail) and can authenticate with it', async () => { const f = fixture(); try {
+    const derived = await createAccount(f.db, { name: 'Maria', email: 'Maria.Silva@test.local', password: PASSWORD, role: 'DISPATCHER', driverId: null }, NOW);
+    assert.equal((await row<User>(f.db, 'SELECT username FROM users WHERE id=?', derived))?.username, 'maria.silva');
+    assert.equal((await authenticate(f.db, 'MARIA.SILVA', PASSWORD)).user.id, derived);
+    assert.equal((await authenticate(f.db, 'maria.silva@test.local', PASSWORD)).user.id, derived);
+    const explicit = await createAccount(f.db, { name: 'João', email: 'joao@test.local', username: ' Joao_JR ', password: PASSWORD, role: 'DISPATCHER', driverId: null }, NOW);
+    assert.equal((await authenticate(f.db, 'joao_jr', PASSWORD)).user.username, 'joao_jr');
+    assert.notEqual(explicit, derived);
+    await rejects(() => createAccount(f.db, { name: 'Outro', email: 'outro@test.local', username: 'maria.silva', password: PASSWORD, role: 'DISPATCHER', driverId: null }, NOW), 409);
+    await rejects(() => createAccount(f.db, { name: 'Outro', email: 'outro@test.local', username: 'a b', password: PASSWORD, role: 'DISPATCHER', driverId: null }, NOW), 400);
+    // Same local part as an existing username: the new account simply has no derived username.
+    const clash = await createAccount(f.db, { name: 'Maria 2', email: 'maria.silva@other.test', password: PASSWORD, role: 'DISPATCHER', driverId: null }, NOW);
+    assert.equal((await row<User>(f.db, 'SELECT username FROM users WHERE id=?', clash))?.username, null);
+    await rejects(() => authenticate(f.db, 'nobody', PASSWORD), 401);
+}
+finally {
+    f.close();
+} });
+test('settings store public WhatsApp numbers and social links; the public page falls back to defaults', async () => { const f = fixture(); try {
+    const base = { companyName: 'JR Caçambas', companyPhone: '', yardAddress: 'Rua Agelina, 424', defaultDays: 7, defaultPriceCents: 0, jobDurationMinutes: 60 };
+    await f.run('saveSettings', { ...base, whatsappNumbers: ['(11) 95629-2968', '+55 11 96615-0912', ''], instagramUrl: '@jrcacambas', facebookUrl: 'https://www.facebook.com/jrcacambas/' });
+    let s = await settings(f.db);
+    assert.deepEqual(s.whatsappNumbers, ['11956292968', '11966150912']);
+    assert.equal(s.instagramUrl, 'https://instagram.com/jrcacambas');
+    assert.equal(s.facebookUrl, 'https://www.facebook.com/jrcacambas');
+    assert.deepEqual(publicContactFrom(s).whatsapp, ['11956292968', '11966150912']);
+    await rejects(() => f.run('saveSettings', { ...base, whatsappNumbers: ['123'], instagramUrl: '', facebookUrl: '' }), 400);
+    await rejects(() => f.run('saveSettings', { ...base, whatsappNumbers: [], instagramUrl: 'https://tiktok.com/@x', facebookUrl: '' }), 400);
+    await rejects(() => f.run('saveSettings', { ...base, whatsappNumbers: ['11956292968', '11956292968'], instagramUrl: '', facebookUrl: '' }), 400);
+    await f.run('saveSettings', { ...base, whatsappNumbers: [], instagramUrl: '', facebookUrl: '' });
+    s = await settings(f.db);
+    assert.deepEqual(s.whatsappNumbers, []);
+    assert.deepEqual(publicContactFrom(s).whatsapp, DEFAULT_WHATSAPP);
+    assert.equal(publicContactFrom(s).instagram, '');
+    assert.equal(socialHandle('https://instagram.com/jrcacambas'), '@jrcacambas');
+    assert.equal(formatBrPhone('11956292968'), '(11) 95629-2968');
+    assert.equal(whatsappLink('11956292968', 'oi'), 'https://wa.me/5511956292968?text=oi');
 }
 finally {
     f.close();

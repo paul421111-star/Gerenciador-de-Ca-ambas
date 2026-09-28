@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { type DB, row, rows, tx, settings } from "./db.ts";
 import { assert, AppError } from "./errors.ts";
 import * as v from "./validate.ts";
-import { createAccount, hashPassword, verifyPassword, USER_COLUMNS, sha256 } from "./auth.ts";
+import { createAccount, hashPassword, verifyPassword, usernameTaken, USER_COLUMNS, sha256 } from "./auth.ts";
 import { dateKey, dateTime, money } from "../shared/format.ts";
 import { rentalGroupCatalog } from "../shared/rental-groups.ts";
 import { isSignatureImage } from "../shared/signature.ts";
+import { socialUrl } from "../shared/contact.ts";
 import type { CommandResult, Container, Customer, CustomerSite, Driver, Truck, User, Rental, Job, Payment, Maintenance, RentalEvent, Audit, Snapshot, Settings, RentalSignature, RentalSignatureRevision, BookingRequest } from "../shared/types.ts";
 const OPEN = "('RESERVED','DELIVERING','ACTIVE','COLLECTING','RETURNING')";
 const TABLES = ["containers", "customers", "customerSites", "drivers", "trucks", "rentals", "jobs", "payments", "maintenance", "users"] as const;
@@ -533,14 +534,17 @@ async function dispatch(db: DB, u: User, action: string, p: Record<string, unkno
             return { id, message: status === "CONFIRMED" ? "Solicitação marcada como confirmada. Crie a locação operacional após combinar os detalhes com o cliente." : "Situação da solicitação atualizada." };
         }
         case "createUser": {
-            const role = v.choice(p, "role", ["ADMIN", "DISPATCHER", "DRIVER"] as const), mail = v.email(p, "email", true);
-            assert(!await row(db, "SELECT id FROM users WHERE email=?", mail), "Este e-mail já está cadastrado.", 409);
+            const role = v.choice(p, "role", ["ADMIN", "DISPATCHER", "DRIVER"] as const), mail = v.email(p, "email", true), username = v.username(p, "username");
+            assert(!await row(db, "SELECT id FROM users WHERE LOWER(email)=?", mail), "Este e-mail já está cadastrado.", 409);
+            if (username)
+                assert(!await usernameTaken(db, username), "Este nome de usuário já está em uso.", 409);
             const driverId = role === "DRIVER" ? v.str(p, "driverId", 1) : null;
             if (driverId) {
                 assert((await find<Driver>(db, "drivers", driverId)).active === 1, "Selecione um motorista ativo.");
                 assert(!await row(db, "SELECT id FROM users WHERE driverId=?", driverId), "Este motorista já possui um usuário.", 409);
             }
-            const id = await createAccount(db, { name: v.str(p, "name", 2, 120), email: mail, password: v.secret(p, "password", 12, 128), role, driverId }, now);
+            // Sem apelido informado, createAccount deriva um do e-mail quando estiver livre.
+            const id = await createAccount(db, { name: v.str(p, "name", 2, 120), email: mail, username: username || undefined, password: v.secret(p, "password", 12, 128), role, driverId }, now);
             return { id, message: "Usuário criado. Compartilhe a senha por um canal privado." };
         }
         case "setUserActive": {
@@ -565,7 +569,26 @@ async function dispatch(db: DB, u: User, action: string, p: Record<string, unkno
             return { id: u.id, message: "Senha alterada. Entre novamente com a nova senha." };
         }
         case "saveSettings": {
-            const s: Settings = { ...(await settings(db)), companyName: v.str(p, "companyName", 2, 120), companyPhone: v.phone(p, "companyPhone", false), yardAddress: v.str(p, "yardAddress", 5, 300), defaultDays: v.integer(p, "defaultDays", 1, 365), defaultPriceCents: v.integer(p, "defaultPriceCents", 0, 100000000), jobDurationMinutes: v.integer(p, "jobDurationMinutes", 15, 480) };
+            const rawNumbers = Array.isArray(p.whatsappNumbers) ? p.whatsappNumbers : [];
+            assert(rawNumbers.length <= 4, "Informe até 4 números de WhatsApp.");
+            const whatsappNumbers = rawNumbers.map((raw, i) => {
+                assert(typeof raw === "string", "Número de WhatsApp inválido.");
+                let n = raw.replace(/\D/g, "");
+                if ((n.length === 12 || n.length === 13) && n.startsWith("55"))
+                    n = n.slice(2);
+                assert(!n || n.length === 10 || n.length === 11, `WhatsApp ${i + 1}: informe DDD e número (10 ou 11 dígitos).`);
+                return n;
+            }).filter(Boolean);
+            assert(new Set(whatsappNumbers).size === whatsappNumbers.length, "Há números de WhatsApp repetidos.");
+            const social = (network: "instagram" | "facebook", key: string) => {
+                try {
+                    return socialUrl(network, v.str(p, key, 0, 200));
+                }
+                catch (error) {
+                    throw new AppError(error instanceof Error ? error.message : "Endereço inválido.", 400);
+                }
+            };
+            const s: Settings = { ...(await settings(db)), companyName: v.str(p, "companyName", 2, 120), companyPhone: v.phone(p, "companyPhone", false), whatsappNumbers, instagramUrl: social("instagram", "instagramUrl"), facebookUrl: social("facebook", "facebookUrl"), yardAddress: v.str(p, "yardAddress", 5, 300), defaultDays: v.integer(p, "defaultDays", 1, 365), defaultPriceCents: v.integer(p, "defaultPriceCents", 0, 100000000), jobDurationMinutes: v.integer(p, "jobDurationMinutes", 15, 480) };
             await db.run("UPDATE settings SET json=? WHERE id=1", JSON.stringify(s));
             return { message: "Configurações salvas." };
         }

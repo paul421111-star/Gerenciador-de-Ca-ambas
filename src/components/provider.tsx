@@ -17,11 +17,45 @@ interface AppState {
     openDetail: (id: string | null) => void;
 }
 const Context = createContext<AppState | null>(null);
+/** Notificação do navegador só quando a aba não está em foco — em foco o toast já avisa. */
+function pushBrowserNotification(body: string) {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted')
+        return;
+    if (!document.hidden && document.hasFocus())
+        return;
+    try {
+        const alert = new Notification('JR Caçambas — nova solicitação', { body, icon: '/brand-lockup.png', tag: 'jr-booking-request' });
+        alert.onclick = () => { window.focus(); window.location.assign('/solicitacoes'); alert.close(); };
+    }
+    catch {
+        /* navegador sem suporte ou bloqueado */
+    }
+}
 export function Provider({ children }: {
     children: ReactNode;
 }) {
     const [data, setData] = useState<Snapshot | null>(null), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [form, openForm] = useState<FormConfig | null>(null), [detail, openDetail] = useState<string | null>(null);
     const sequence = useRef(0), pending = useRef(false), keys = useRef(new Map<string, string>()), mounted = useRef(true);
+    /** IDs de solicitações já vistas nesta sessão; null até o primeiro snapshot (que não gera aviso). */
+    const seenRequests = useRef<Set<string> | null>(null);
+    const announceNewRequests = useCallback((snapshot: Snapshot) => {
+        const requests = snapshot.bookingRequests ?? [];
+        if (!seenRequests.current) {
+            seenRequests.current = new Set(requests.map(r => r.id));
+            return;
+        }
+        const seen = seenRequests.current;
+        const fresh = requests.filter(r => r.status === 'NEW' && !seen.has(r.id));
+        for (const r of requests)
+            seen.add(r.id);
+        if (!fresh.length)
+            return;
+        const text = fresh.length === 1
+            ? `Nova solicitação de ${fresh[0].customerName} — protocolo ${fresh[0].protocol}.`
+            : `${fresh.length} novas solicitações de clientes chegaram.`;
+        setNotice(text);
+        pushBrowserNotification(text);
+    }, []);
     const refresh = useCallback(async () => { const n = ++sequence.current; try {
         const res = await fetch('/api/snapshot', { cache: 'no-store', credentials: 'same-origin' });
         if (res.status === 401) {
@@ -34,15 +68,27 @@ export function Provider({ children }: {
         if (mounted.current && n === sequence.current) {
             setData(body);
             setError('');
+            announceNewRequests(body);
         }
     }
     catch (e) {
         if (mounted.current && n === sequence.current)
             setError(e instanceof Error ? e.message : 'Sem conexão com o servidor.');
-    } }, []);
+    } }, [announceNewRequests]);
     useEffect(() => { mounted.current = true; void refresh(); const id = setInterval(() => { if (!document.hidden && !pending.current)
         void refresh(); }, 30000); const focus = () => { if (!pending.current)
         void refresh(); }; window.addEventListener('focus', focus); return () => { mounted.current = false; clearInterval(id); window.removeEventListener('focus', focus); }; }, [refresh]);
+    const role = data?.user.role;
+    useEffect(() => {
+        // Pede permissão de notificação no primeiro clique (o navegador exige gesto do usuário).
+        if (!role || role === 'DRIVER')
+            return;
+        if (typeof Notification === 'undefined' || Notification.permission !== 'default')
+            return;
+        const ask = () => { void Notification.requestPermission(); };
+        window.addEventListener('pointerdown', ask, { once: true });
+        return () => window.removeEventListener('pointerdown', ask);
+    }, [role]);
     useEffect(() => { if (!notice)
         return; const timer = setTimeout(() => setNotice(''), 7000); return () => clearTimeout(timer); }, [notice]);
     const run = useCallback<Run>(async (action, payload) => {
