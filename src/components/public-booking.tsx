@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 const CONTACTS = [
     { label: '(11) 95629-2968', value: '5511956292968' },
@@ -17,6 +17,28 @@ interface Result {
     protocol: string;
     message: string;
 }
+
+interface TrackedRequest {
+    protocol: string;
+    customerName: string;
+    serviceType: keyof typeof SERVICE_LABELS;
+    preferredDate: string;
+    preferredPeriod: 'MORNING' | 'AFTERNOON' | 'ANY';
+    neighborhood: string;
+    city: string;
+    status: 'NEW' | 'CONTACTED' | 'CONFIRMED' | 'DECLINED';
+    summary: string;
+    createdAt: string;
+}
+
+const TRACK_LABEL = {
+    NEW: 'Recebida',
+    CONTACTED: 'Em contato',
+    CONFIRMED: 'Confirmada',
+    DECLINED: 'Não atendida'
+} as const;
+
+const PERIOD_LABEL = { MORNING: 'Manhã', AFTERNOON: 'Tarde', ANY: 'Qualquer período' } as const;
 
 function digits(value: string): string {
     return value.replace(/\D/g, '');
@@ -45,6 +67,31 @@ export function PublicBooking() {
     const [cepBusy, setCepBusy] = useState(false);
     const [error, setError] = useState('');
     const [result, setResult] = useState<Result | null>(null);
+    const [trackPhone, setTrackPhone] = useState('');
+    const [trackEmail, setTrackEmail] = useState('');
+    const [trackBusy, setTrackBusy] = useState(false);
+    const [trackError, setTrackError] = useState('');
+    const [tracked, setTracked] = useState<TrackedRequest[] | null>(null);
+    const [captchaId, setCaptchaId] = useState('');
+    const [captchaImage, setCaptchaImage] = useState('');
+
+    async function loadCaptcha() {
+        setCaptchaId('');
+        setCaptchaImage('');
+        try {
+            const response = await fetch('/api/public/captcha', { cache: 'no-store' });
+            const body = await response.json() as { id?: string; image?: string };
+            if (response.ok && body.id && body.image) {
+                setCaptchaId(body.id);
+                setCaptchaImage(body.image);
+            }
+        }
+        catch {
+            setCaptchaImage('');
+        }
+    }
+
+    useEffect(() => { void loadCaptcha(); }, []);
 
     async function lookupCep(value: string) {
         const cep = digits(value);
@@ -85,7 +132,10 @@ export function PublicBooking() {
                 })
             });
             const body = await response.json() as Result & { error?: string };
-            if (!response.ok) throw new Error(body.error || 'Não foi possível enviar a solicitação.');
+            if (!response.ok) {
+                void loadCaptcha();
+                throw new Error(body.error || 'Não foi possível enviar a solicitação.');
+            }
             setResult(body);
             document.getElementById('solicitar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
@@ -94,6 +144,29 @@ export function PublicBooking() {
         }
         finally {
             setBusy(false);
+        }
+    }
+
+    async function track(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setTrackBusy(true);
+        setTrackError('');
+        setTracked(null);
+        try {
+            const response = await fetch('/api/public/booking/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: trackPhone, email: trackEmail })
+            });
+            const body = await response.json() as { requests?: TrackedRequest[]; error?: string };
+            if (!response.ok) throw new Error(body.error || 'Não foi possível consultar o andamento.');
+            setTracked(body.requests ?? []);
+        }
+        catch (reason) {
+            setTrackError(reason instanceof Error ? reason.message : 'Não foi possível consultar o andamento.');
+        }
+        finally {
+            setTrackBusy(false);
         }
     }
 
@@ -108,6 +181,7 @@ export function PublicBooking() {
             </a>
             <nav aria-label="Navegação da página">
                 <a href="#como-funciona">Como funciona</a>
+                <a href="#acompanhar">Acompanhar</a>
                 <a href="#atendimento">Área de atendimento</a>
                 <a href="#duvidas">Dúvidas</a>
             </nav>
@@ -167,7 +241,7 @@ export function PublicBooking() {
                     <h2>Agora é com a gente.</h2>
                     <p>{result.message}</p>
                     <div className="public-protocol"><small>Seu protocolo</small><strong>{result.protocol}</strong></div>
-                    <p className="public-success-note">Guarde esse número. Ele identifica seu atendimento.</p>
+                    <p className="public-success-note">Guarde esse número. Depois, consulte o andamento com o mesmo e-mail e telefone.</p>
                     <div className="public-success-actions">
                         <a className="public-button primary" href={`https://wa.me/${CONTACTS[0].value}?text=${whatsappText}`} target="_blank" rel="noreferrer">Continuar no WhatsApp</a>
                         <button className="public-link-button" onClick={() => setResult(null)}>Fazer outra solicitação</button>
@@ -185,7 +259,7 @@ export function PublicBooking() {
                     <div className="public-form-grid">
                         <label className="wide"><span>Nome ou razão social *</span><input name="customerName" required minLength={2} maxLength={120} autoComplete="name" placeholder="Como podemos chamar você?"/></label>
                         <label><span>WhatsApp / telefone *</span><input name="phoneDisplay" required inputMode="tel" autoComplete="tel" value={phone} onChange={event => setPhone(phoneMask(event.target.value))} placeholder="(11) 99999-9999"/></label>
-                        <label><span>E-mail</span><input name="email" type="email" autoComplete="email" maxLength={254} placeholder="voce@exemplo.com"/></label>
+                        <label><span>E-mail *</span><input name="email" type="email" required autoComplete="email" maxLength={254} placeholder="voce@exemplo.com"/><small>Use este e-mail para consultar o andamento.</small></label>
                         <label><span>CEP</span><input name="postalCodeDisplay" inputMode="numeric" autoComplete="postal-code" value={postalCode} onChange={event => setPostalCode(cepMask(event.target.value))} onBlur={event => void lookupCep(event.target.value)} placeholder="00000-000"/><small>{cepBusy ? 'Buscando endereço...' : 'Preenchemos o endereço pelo CEP.'}</small></label>
                         <label className="wide"><span>Rua, número e complemento *</span><input name="addressDisplay" required minLength={5} maxLength={240} autoComplete="street-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Ex.: Rua das Flores, 120 — portão azul"/></label>
                         <label><span>Bairro *</span><input name="neighborhoodDisplay" required minLength={2} maxLength={100} value={neighborhood} onChange={event => setNeighborhood(event.target.value)} placeholder="Bairro"/></label>
@@ -200,12 +274,48 @@ export function PublicBooking() {
                         <label className="wide"><span>Observações</span><textarea name="notes" rows={3} maxLength={1000} placeholder="Informe acesso estreito, portão, referência, quantidade estimada ou outra orientação importante."/></label>
                     </div>
                     <input className="public-honeypot" name="companyWebsite" tabIndex={-1} autoComplete="off" aria-hidden="true"/>
+                    <div className="public-captcha">
+                        <div>
+                            <span>Confirme que você não é um robô *</span>
+                            <small>Digite os 5 caracteres da imagem. Maiúsculas e minúsculas valem igual.</small>
+                        </div>
+                        <div className="public-captcha-row">
+                            {captchaImage
+                                ? <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(captchaImage)}`} alt="Código de verificação" width={168} height={58}/>
+                                : <div className="public-captcha-pending">Carregando código...</div>}
+                            <button type="button" onClick={() => void loadCaptcha()}>Trocar código</button>
+                            <input name="captchaAnswer" required autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={8} placeholder="Código da imagem" aria-label="Código da imagem"/>
+                        </div>
+                        <input type="hidden" name="captchaId" value={captchaId}/>
+                    </div>
                     <label className="public-consent"><input name="consent" type="checkbox" required/><span>Autorizo a JR Caçambas a entrar em contato pelos dados informados para tratar desta solicitação.</span></label>
                     {error && <div className="public-form-error" role="alert">{error}</div>}
                     <button className="public-submit" type="submit" disabled={busy}>{busy ? 'Enviando solicitação...' : <>Enviar solicitação <span>→</span></>}</button>
                     <p className="public-disclaimer">O envio é gratuito e não confirma preço, disponibilidade ou reserva. A contratação acontece somente após o retorno da equipe.</p>
                 </form>}
             </div>
+        </section>
+
+        <section className="public-track" id="acompanhar">
+            <div className="public-section-heading">
+                <span>ACOMPANHAMENTO</span>
+                <h2>Como está o seu pedido?</h2>
+                <p>Informe o mesmo e-mail e telefone usados na solicitação. Mostramos só o andamento, sem dados internos da equipe.</p>
+            </div>
+            <form className="public-track-form" onSubmit={track}>
+                <label><span>E-mail</span><input type="email" required autoComplete="email" maxLength={254} value={trackEmail} onChange={event => setTrackEmail(event.target.value)} placeholder="voce@exemplo.com"/></label>
+                <label><span>WhatsApp / telefone</span><input required inputMode="tel" autoComplete="tel" value={trackPhone} onChange={event => setTrackPhone(phoneMask(event.target.value))} placeholder="(11) 99999-9999"/></label>
+                <button className="public-button primary" type="submit" disabled={trackBusy}>{trackBusy ? 'Consultando...' : 'Consultar andamento'}</button>
+            </form>
+            {trackError && <div className="public-form-error public-track-feedback" role="alert">{trackError}</div>}
+            {tracked && (tracked.length ? <div className="public-track-list">{tracked.map(request =>
+                <article key={request.protocol} className={`public-track-card status-${request.status.toLowerCase()}`}>
+                    <div><span>{request.protocol}</span><strong className="public-track-badge">{TRACK_LABEL[request.status]}</strong></div>
+                    <h3>{request.customerName}</h3>
+                    <p className="public-track-service">{SERVICE_LABELS[request.serviceType]}</p>
+                    <p>{request.summary}</p>
+                    <small>{request.preferredDate.split('-').reverse().join('/')} · {PERIOD_LABEL[request.preferredPeriod]} · {request.neighborhood}, {request.city}</small>
+                </article>)}</div> : <p className="public-track-empty">Não encontramos pedidos com esses dados. Confira o e-mail e o telefone ou fale com a equipe pelo WhatsApp.</p>)}
         </section>
 
         <section className="public-coverage" id="atendimento">

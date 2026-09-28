@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { type DB, row, tx } from './db.ts';
+import { type DB, row, rows, tx } from './db.ts';
 import { assert } from './errors.ts';
 import * as v from './validate.ts';
 import { dateKey } from '../shared/format.ts';
+import { verifyCaptcha } from './captcha.ts';
 
 export interface PublicBookingResult {
     id: string;
@@ -28,7 +29,7 @@ export async function createPublicBooking(db: DB, raw: unknown, at = new Date())
 
     const customerName = v.str(payload, 'customerName', 2, 120);
     const phone = v.phone(payload, 'phone');
-    const email = v.email(payload, 'email');
+    const email = v.email(payload, 'email', true);
     const serviceType = v.choice(payload, 'serviceType', ['RENTAL', 'EXCHANGE', 'PICKUP'] as const);
     const postalCode = v.str(payload, 'postalCode', 0, 12).replace(/\D/g, '');
     assert(!postalCode || postalCode.length === 8, 'Informe um CEP válido.');
@@ -39,6 +40,7 @@ export async function createPublicBooking(db: DB, raw: unknown, at = new Date())
     const preferredPeriod = v.choice(payload, 'preferredPeriod', ['MORNING', 'AFTERNOON', 'ANY'] as const);
     const wasteType = v.str(payload, 'wasteType', 2, 120);
     const notes = v.str(payload, 'notes', 0, 1000);
+    verifyCaptcha(typeof payload.captchaId === 'string' ? payload.captchaId : '', typeof payload.captchaAnswer === 'string' ? payload.captchaAnswer : '', at);
     const now = at.toISOString();
     const recent = new Date(at.getTime() - 5 * 60000).toISOString();
 
@@ -57,7 +59,54 @@ export async function createPublicBooking(db: DB, raw: unknown, at = new Date())
         return {
             id,
             protocol,
-            message: 'Solicitação recebida. Nossa equipe confirmará disponibilidade, valor e horário pelo telefone informado.'
+            message: 'Solicitação recebida. Nossa equipe confirmará disponibilidade, valor e horário pelo telefone informado. Guarde o e-mail e o telefone para consultar o andamento.'
         };
     });
+}
+
+const STATUS_SUMMARY = {
+    NEW: 'Recebemos seu pedido. A equipe ainda vai confirmar disponibilidade, valor e horário.',
+    CONTACTED: 'Nossa equipe já iniciou o contato para combinar os detalhes.',
+    CONFIRMED: 'O atendimento foi confirmado. Os detalhes finais seguem pelo telefone informado.',
+    DECLINED: 'Não foi possível atender este pedido. Fale com a equipe se quiser uma nova opção.'
+} as const;
+
+export interface PublicBookingStatus {
+    protocol: string;
+    customerName: string;
+    serviceType: 'RENTAL' | 'EXCHANGE' | 'PICKUP';
+    preferredDate: string;
+    preferredPeriod: 'MORNING' | 'AFTERNOON' | 'ANY';
+    neighborhood: string;
+    city: string;
+    status: keyof typeof STATUS_SUMMARY;
+    summary: string;
+    createdAt: string;
+}
+
+const lookupHits = new Map<string, number[]>();
+
+export async function lookupPublicBookings(db: DB, raw: unknown, at = new Date()): Promise<{ requests: PublicBookingStatus[] }> {
+    const payload = v.object(raw);
+    const phone = v.phone(payload, 'phone');
+    const email = v.email(payload, 'email', true);
+    const recent = (lookupHits.get(phone) ?? []).filter(time => at.getTime() - time < 10 * 60000);
+    assert(recent.length < 8, 'Muitas consultas seguidas. Aguarde alguns minutos e tente de novo.', 429);
+    recent.push(at.getTime());
+    lookupHits.set(phone, recent);
+    const found = await rows<{
+        protocol: string;
+        customerName: string;
+        serviceType: PublicBookingStatus['serviceType'];
+        preferredDate: string;
+        preferredPeriod: PublicBookingStatus['preferredPeriod'];
+        neighborhood: string;
+        city: string;
+        status: PublicBookingStatus['status'];
+        createdAt: string;
+    }>(db, `SELECT protocol,customerName,serviceType,preferredDate,preferredPeriod,neighborhood,city,status,createdAt
+        FROM bookingRequests WHERE phone=? AND email=? ORDER BY createdAt DESC LIMIT 10`, phone, email);
+    return {
+        requests: found.map(request => ({ ...request, summary: STATUS_SUMMARY[request.status] }))
+    };
 }

@@ -4,7 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { openDatabase, row, usesPostgres } from '../src/server/db.ts';
 import { seed } from '../src/server/seed.ts';
 import { handleApi } from '../src/server/api.ts';
+import { createCaptcha } from '../src/server/captcha.ts';
 const password = 'Private-test-admin-password!';
+function solved<T extends Record<string, unknown>>(payload: T) {
+    const captcha = createCaptcha();
+    return { ...payload, captchaId: captcha.id, captchaAnswer: captcha.answer };
+}
 async function fixture() { const db = openDatabase(':memory:'); await seed(db, { email: 'admin@test.local', password }); const req = (path: string, method = 'GET', body?: unknown, cookie?: string, headers: Record<string, string> = {}) => handleApi(new Request('http://localhost:3000' + path, { method, headers: { origin: 'http://localhost:3000', 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), db); return { db, req, login: async () => { const r = await req('/api/login', 'POST', { email: 'admin@test.local', password }); assert.equal(r.status, 200); return r.headers.get('set-cookie')!.split(';')[0]; } }; }
 test('API rejects anonymous access and never returns a password hash', async () => { const f = await fixture(); try {
     assert.equal((await f.req('/api/snapshot')).status, 401);
@@ -49,13 +54,13 @@ test('public booking stores a request without creating an operational rental', a
         companyWebsite: '',
         consent: true
     };
-    const response = await f.req('/api/public/booking', 'POST', payload);
+    const response = await f.req('/api/public/booking', 'POST', solved(payload));
     assert.equal(response.status, 201);
     const body = await response.json();
     assert.match(body.protocol, /^JR-\d{8}-[A-F0-9]{6}$/);
     assert.equal((await row<{ n: number }>(f.db, 'SELECT COUNT(*) n FROM bookingRequests'))!.n, 1);
     assert.equal((await row<{ n: number }>(f.db, 'SELECT COUNT(*) n FROM rentals'))!.n, 0);
-    assert.equal((await f.req('/api/public/booking', 'POST', payload)).status, 409);
+    assert.equal((await f.req('/api/public/booking', 'POST', solved(payload))).status, 409);
     const cookie = await f.login();
     const snapshot = await (await f.req('/api/snapshot', 'GET', undefined, cookie)).json();
     assert.equal(snapshot.bookingRequests.length, 1);
@@ -66,12 +71,51 @@ test('public booking stores a request without creating an operational rental', a
 finally {
     f.db.close();
 } });
+test('public captcha hides the code and rejects a wrong or reused answer', async () => { const f = await fixture(); try {
+    const issued = createCaptcha();
+    assert.equal(issued.image.includes(issued.answer), false);
+    assert.equal(issued.image.includes('<text'), false);
+    const visible = await f.req('/api/public/captcha');
+    assert.equal(visible.status, 200);
+    assert.equal((await visible.json()).answer, undefined);
+    const preferredDate = new Date(Date.now() + 9 * 86400000).toISOString().slice(0, 10);
+    const payload = { customerName: 'Cliente Captcha', phone: '11977776666', email: 'captcha@example.test', serviceType: 'RENTAL', postalCode: '', address: 'Rua do Teste, 8', neighborhood: 'Centro', city: 'Embu das Artes / SP', preferredDate, preferredPeriod: 'ANY', wasteType: 'Entulho', notes: '', companyWebsite: '', consent: true };
+    const wrong = issued.answer.slice(0, 4) + (issued.answer.endsWith('A') ? 'B' : 'A');
+    assert.equal((await f.req('/api/public/booking', 'POST', { ...payload, captchaId: issued.id, captchaAnswer: wrong })).status, 400);
+    assert.equal((await f.req('/api/public/booking', 'POST', { ...payload, captchaId: issued.id, captchaAnswer: issued.answer })).status, 400);
+    assert.equal((await row<{ n: number }>(f.db, 'SELECT COUNT(*) n FROM bookingRequests'))!.n, 0);
+}
+finally {
+    f.db.close();
+} });
 test('public booking requires consent and rejects cross-site submissions', async () => { const f = await fixture(); try {
     const preferredDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
     const payload = { customerName: 'Cliente', phone: '11956292968', email: '', serviceType: 'RENTAL', postalCode: '', address: 'Rua de Teste, 10', neighborhood: 'Centro', city: 'Taboão da Serra / SP', preferredDate, preferredPeriod: 'ANY', wasteType: 'Entulho', notes: '', companyWebsite: '', consent: false };
     assert.equal((await f.req('/api/public/booking', 'POST', payload)).status, 400);
     assert.equal((await f.req('/api/public/booking', 'POST', { ...payload, consent: true }, undefined, { origin: 'https://evil.test' })).status, 403);
     assert.equal((await row<{ n: number }>(f.db, 'SELECT COUNT(*) n FROM bookingRequests'))!.n, 0);
+}
+finally {
+    f.db.close();
+} });
+test('public booking status matches email and phone without exposing internal notes', async () => { const f = await fixture(); try {
+    const preferredDate = new Date(Date.now() + 8 * 86400000).toISOString().slice(0, 10);
+    const payload = { customerName: 'Cliente Consulta', phone: '(11) 98888-7777', email: 'Consulta@Example.Test', serviceType: 'EXCHANGE', postalCode: '', address: 'Rua Sigilosa, 50', neighborhood: 'Jardim Record', city: 'Taboão da Serra / SP', preferredDate, preferredPeriod: 'AFTERNOON', wasteType: 'Madeira', notes: 'Portão dos fundos', companyWebsite: '', consent: true };
+    const created = await f.req('/api/public/booking', 'POST', solved(payload));
+    assert.equal(created.status, 201);
+    const protocol = (await created.json()).protocol;
+    const found = await f.req('/api/public/booking/status', 'POST', { phone: '11988887777', email: 'consulta@example.test' });
+    assert.equal(found.status, 200);
+    const body = await found.json();
+    assert.equal(body.requests.length, 1);
+    assert.equal(body.requests[0].protocol, protocol);
+    assert.equal(body.requests[0].status, 'NEW');
+    assert.equal(body.requests[0].address, undefined);
+    assert.equal(body.requests[0].notes, undefined);
+    assert.equal(body.requests[0].statusNote, undefined);
+    assert.equal((await f.req('/api/public/booking/status', 'POST', { phone: '11988887777', email: 'outro@example.test' })).status, 200);
+    assert.equal((await (await f.req('/api/public/booking/status', 'POST', { phone: '11988887777', email: 'outro@example.test' })).json()).requests.length, 0);
+    assert.equal((await f.req('/api/public/booking/status', 'POST', { phone: '11988887777', email: 'consulta@example.test' }, undefined, { origin: 'https://evil.test' })).status, 403);
 }
 finally {
     f.db.close();
