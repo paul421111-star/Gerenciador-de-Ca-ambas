@@ -17,7 +17,7 @@ O projeto usa `node:sqlite`, incluído no Node, e scripts TypeScript executados 
 
 Abra `INSTALAR_E_INICIAR.cmd`. Ele instala dependências, executa a configuração inicial e inicia o servidor de desenvolvimento.
 
-Você informará o e-mail, o nome e a senha do administrador. A senha precisa de 12 a 128 caracteres e será confirmada. Use uma senha longa e exclusiva. Nenhuma credencial padrão é publicada no projeto.
+Você informará o e-mail, o nome e a senha do administrador. A senha precisa de 6 a 128 caracteres e será confirmada. Use uma senha longa e exclusiva. Nenhuma credencial padrão é publicada no projeto.
 
 O navegador pode abrir antes de o servidor terminar de iniciar. Aguarde `Ready` no terminal e atualize a página. Mantenha a janela do terminal aberta. Para parar, pressione `Ctrl+C`.
 

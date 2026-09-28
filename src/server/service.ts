@@ -544,7 +544,7 @@ async function dispatch(db: DB, u: User, action: string, p: Record<string, unkno
                 assert(!await row(db, "SELECT id FROM users WHERE driverId=?", driverId), "Este motorista já possui um usuário.", 409);
             }
             // Sem apelido informado, createAccount deriva um do e-mail quando estiver livre.
-            const id = await createAccount(db, { name: v.str(p, "name", 2, 120), email: mail, username: username || undefined, password: v.secret(p, "password", 12, 128), role, driverId }, now);
+            const id = await createAccount(db, { name: v.str(p, "name", 2, 120), email: mail, username: username || undefined, password: v.secret(p, "password", 6, 128), role, driverId }, now);
             return { id, message: "Usuário criado. Compartilhe a senha por um canal privado." };
         }
         case "setUserActive": {
@@ -562,7 +562,7 @@ async function dispatch(db: DB, u: User, action: string, p: Record<string, unkno
                 passwordHash: string;
             }>(db, "SELECT passwordHash FROM users WHERE id=?", u.id))!;
             assert(verifyPassword(v.secret(p, "currentPassword", 1, 128), saved.passwordHash), "A senha atual está incorreta.");
-            const next = v.secret(p, "newPassword", 12, 128);
+            const next = v.secret(p, "newPassword", 6, 128);
             assert(!verifyPassword(next, saved.passwordHash), "Escolha uma senha diferente da atual.");
             await db.run("UPDATE users SET passwordHash=? WHERE id=?", hashPassword(next), u.id);
             await db.run("DELETE FROM sessions WHERE userId=?", u.id);

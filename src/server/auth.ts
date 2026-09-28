@@ -6,9 +6,11 @@ import { isValidUsername, normalizeUsername, usernameFromEmail } from '../shared
 export const USER_COLUMNS = 'id,name,email,username,role,driverId,active,createdAt';
 export const SESSION_COOKIE = 'jr_session';
 export const SESSION_SECONDS = 12 * 60 * 60;
+export const PASSWORD_MIN = 6;
+export const PASSWORD_MAX = 128;
 export const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 export function hashPassword(password: string): string {
-    assert(password.length >= 12 && password.length <= 128, 'A senha deve ter de 12 a 128 caracteres.');
+    assert(password.length >= PASSWORD_MIN && password.length <= PASSWORD_MAX, `A senha deve ter de ${PASSWORD_MIN} a ${PASSWORD_MAX} caracteres.`);
     const salt = randomBytes(16).toString('hex');
     return `scrypt:${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
 }

@@ -5,7 +5,7 @@ let db;try{
  const login=(process.env.JR_ADMIN_EMAIL||await ask('E-mail ou usuário da conta a recuperar')).trim().toLowerCase();
  const user=await row(db,login.includes('@')?'SELECT id FROM users WHERE LOWER(email)=?':'SELECT id FROM users WHERE LOWER(username)=?',login);
  if(!user)throw new Error('Conta não encontrada.');
- const password=process.env.JR_ADMIN_PASSWORD||await askPassword('Nova senha (mínimo 12 caracteres)');
+ const password=process.env.JR_ADMIN_PASSWORD||await askPassword('Nova senha (mínimo 6 caracteres)');
  const hash=hashPassword(password);
  await tx(db,async()=>{
   await db.run('UPDATE users SET passwordHash=? WHERE id=?',hash,user.id);

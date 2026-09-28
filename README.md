@@ -6,7 +6,7 @@ Projeto reestruturado em **Next.js App Router + React + TypeScript**, com API no
 
 ## Comece aqui
 
-No Windows, extraia o ZIP para uma pasta local, como `C:\Projetos\jr-cacambas`. Instale **Node.js 22.16 ou superior da linha 22** e abra `INSTALAR_E_INICIAR.cmd`. Na primeira execução, informe o nome, o e-mail e uma senha de pelo menos 12 caracteres para o administrador. A senha não vem pronta no projeto.
+No Windows, extraia o ZIP para uma pasta local, como `C:\Projetos\jr-cacambas`. Instale **Node.js 22.16 ou superior da linha 22** e abra `INSTALAR_E_INICIAR.cmd`. Na primeira execução, informe o nome, o e-mail e uma senha de pelo menos 6 caracteres para o administrador. A senha não vem pronta no projeto.
 
 Pelo terminal, dentro da pasta que contém `package.json`:
 

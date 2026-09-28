@@ -79,7 +79,7 @@ export function locationPrecision(p: Record<string, unknown>, coords: {
     return 'CONFIRMED';
 }
 /** Passwords are opaque: never trim or normalize a user's secret. */
-export function secret(p: Record<string, unknown>, key: string, min = 12, max = 128): string {
+export function secret(p: Record<string, unknown>, key: string, min = 6, max = 128): string {
     const value = p[key];
     assert(typeof value === 'string' && value.length >= min && value.length <= max, `Campo ${key}: use de ${min} a ${max} caracteres.`);
     return value;
