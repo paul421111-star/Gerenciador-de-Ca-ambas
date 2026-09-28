@@ -86,27 +86,29 @@ export interface PublicBookingStatus {
 
 const lookupHits = new Map<string, number[]>();
 
-export async function lookupPublicBookings(db: DB, raw: unknown, at = new Date()): Promise<{ requests: PublicBookingStatus[] }> {
-    const payload = v.object(raw);
-    const phone = v.phone(payload, 'phone');
-    const email = v.email(payload, 'email', true);
-    const recent = (lookupHits.get(phone) ?? []).filter(time => at.getTime() - time < 10 * 60000);
+const STATUS_COLUMNS = `protocol,customerName,serviceType,preferredDate,preferredPeriod,neighborhood,city,status,createdAt`;
+
+function limitLookups(key: string, at: Date): void {
+    const recent = (lookupHits.get(key) ?? []).filter(time => at.getTime() - time < 10 * 60000);
     assert(recent.length < 8, 'Muitas consultas seguidas. Aguarde alguns minutos e tente de novo.', 429);
     recent.push(at.getTime());
-    lookupHits.set(phone, recent);
-    const found = await rows<{
-        protocol: string;
-        customerName: string;
-        serviceType: PublicBookingStatus['serviceType'];
-        preferredDate: string;
-        preferredPeriod: PublicBookingStatus['preferredPeriod'];
-        neighborhood: string;
-        city: string;
-        status: PublicBookingStatus['status'];
-        createdAt: string;
-    }>(db, `SELECT protocol,customerName,serviceType,preferredDate,preferredPeriod,neighborhood,city,status,createdAt
-        FROM bookingRequests WHERE phone=? AND email=? ORDER BY createdAt DESC LIMIT 10`, phone, email);
-    return {
-        requests: found.map(request => ({ ...request, summary: STATUS_SUMMARY[request.status] }))
-    };
+    lookupHits.set(key, recent);
+}
+
+export async function lookupPublicBookings(db: DB, raw: unknown, at = new Date()): Promise<{ requests: PublicBookingStatus[] }> {
+    const payload = v.object(raw);
+    const protocol = v.str(payload, 'protocol', 0, 24).toUpperCase().replace(/\s/g, '');
+    let found: Omit<PublicBookingStatus, 'summary'>[];
+    if (protocol) {
+        assert(/^JR-\d{8}-[A-F0-9]{6}$/.test(protocol), 'Informe o número do pedido como no comprovante. Ex.: JR-20260928-AB12CD.');
+        limitLookups(protocol, at);
+        found = await rows<Omit<PublicBookingStatus, 'summary'>>(db, `SELECT ${STATUS_COLUMNS} FROM bookingRequests WHERE protocol=? LIMIT 1`, protocol);
+    }
+    else {
+        const phone = v.phone(payload, 'phone');
+        const email = v.email(payload, 'email', true);
+        limitLookups(phone, at);
+        found = await rows<Omit<PublicBookingStatus, 'summary'>>(db, `SELECT ${STATUS_COLUMNS} FROM bookingRequests WHERE phone=? AND email=? ORDER BY createdAt DESC LIMIT 10`, phone, email);
+    }
+    return { requests: found.map(request => ({ ...request, summary: STATUS_SUMMARY[request.status] })) };
 }

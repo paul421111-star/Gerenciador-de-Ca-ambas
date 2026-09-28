@@ -104,6 +104,11 @@ test('public booking status matches email and phone without exposing internal no
     const created = await f.req('/api/public/booking', 'POST', solved(payload));
     assert.equal(created.status, 201);
     const protocol = (await created.json()).protocol;
+    const byProtocol = await f.req('/api/public/booking/status', 'POST', { protocol: protocol.toLowerCase() });
+    assert.equal(byProtocol.status, 200);
+    assert.equal((await byProtocol.json()).requests[0].protocol, protocol);
+    assert.equal((await (await f.req('/api/public/booking/status', 'POST', { protocol: 'JR-20260928-ABC123' })).json()).requests.length, 0);
+    assert.equal((await f.req('/api/public/booking/status', 'POST', { protocol: 'pedido-123' })).status, 400);
     const found = await f.req('/api/public/booking/status', 'POST', { phone: '11988887777', email: 'consulta@example.test' });
     assert.equal(found.status, 200);
     const body = await found.json();

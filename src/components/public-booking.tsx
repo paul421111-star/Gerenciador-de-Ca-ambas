@@ -67,6 +67,8 @@ export function PublicBooking() {
     const [cepBusy, setCepBusy] = useState(false);
     const [error, setError] = useState('');
     const [result, setResult] = useState<Result | null>(null);
+    const [trackMode, setTrackMode] = useState<'protocol' | 'contact'>('protocol');
+    const [trackProtocol, setTrackProtocol] = useState('');
     const [trackPhone, setTrackPhone] = useState('');
     const [trackEmail, setTrackEmail] = useState('');
     const [trackBusy, setTrackBusy] = useState(false);
@@ -156,7 +158,9 @@ export function PublicBooking() {
             const response = await fetch('/api/public/booking/status', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: trackPhone, email: trackEmail })
+                body: JSON.stringify(trackMode === 'protocol'
+                    ? { protocol: trackProtocol }
+                    : { phone: trackPhone, email: trackEmail })
             });
             const body = await response.json() as { requests?: TrackedRequest[]; error?: string };
             if (!response.ok) throw new Error(body.error || 'Não foi possível consultar o andamento.');
@@ -300,11 +304,17 @@ export function PublicBooking() {
             <div className="public-section-heading">
                 <span>ACOMPANHAMENTO</span>
                 <h2>Como está o seu pedido?</h2>
-                <p>Informe o mesmo e-mail e telefone usados na solicitação. Mostramos só o andamento, sem dados internos da equipe.</p>
+                <p>Use o número do pedido ou o mesmo e-mail e celular da solicitação. Mostramos só o andamento, sem dados internos da equipe.</p>
             </div>
-            <form className="public-track-form" onSubmit={track}>
-                <label><span>E-mail</span><input type="email" required autoComplete="email" maxLength={254} value={trackEmail} onChange={event => setTrackEmail(event.target.value)} placeholder="voce@exemplo.com"/></label>
-                <label><span>WhatsApp / telefone</span><input required inputMode="tel" autoComplete="tel" value={trackPhone} onChange={event => setTrackPhone(phoneMask(event.target.value))} placeholder="(11) 99999-9999"/></label>
+            <div className="public-track-modes" role="tablist" aria-label="Forma de consulta">
+                <button type="button" role="tab" aria-selected={trackMode === 'protocol'} className={trackMode === 'protocol' ? 'selected' : ''} onClick={() => { setTrackMode('protocol'); setTracked(null); setTrackError(''); }}>Número do pedido</button>
+                <button type="button" role="tab" aria-selected={trackMode === 'contact'} className={trackMode === 'contact' ? 'selected' : ''} onClick={() => { setTrackMode('contact'); setTracked(null); setTrackError(''); }}>E-mail e celular</button>
+            </div>
+            <form className={`public-track-form${trackMode === 'protocol' ? ' protocol' : ''}`} onSubmit={track}>
+                {trackMode === 'protocol'
+                    ? <label><span>Número do pedido</span><input required autoCapitalize="characters" spellCheck={false} maxLength={24} value={trackProtocol} onChange={event => setTrackProtocol(event.target.value.toUpperCase())} placeholder="JR-20260928-AB12CD"/></label>
+                    : <><label><span>E-mail</span><input type="email" required autoComplete="email" maxLength={254} value={trackEmail} onChange={event => setTrackEmail(event.target.value)} placeholder="voce@exemplo.com"/></label>
+                        <label><span>WhatsApp / telefone</span><input required inputMode="tel" autoComplete="tel" value={trackPhone} onChange={event => setTrackPhone(phoneMask(event.target.value))} placeholder="(11) 99999-9999"/></label></>}
                 <button className="public-button primary" type="submit" disabled={trackBusy}>{trackBusy ? 'Consultando...' : 'Consultar andamento'}</button>
             </form>
             {trackError && <div className="public-form-error public-track-feedback" role="alert">{trackError}</div>}
@@ -315,7 +325,7 @@ export function PublicBooking() {
                     <p className="public-track-service">{SERVICE_LABELS[request.serviceType]}</p>
                     <p>{request.summary}</p>
                     <small>{request.preferredDate.split('-').reverse().join('/')} · {PERIOD_LABEL[request.preferredPeriod]} · {request.neighborhood}, {request.city}</small>
-                </article>)}</div> : <p className="public-track-empty">Não encontramos pedidos com esses dados. Confira o e-mail e o telefone ou fale com a equipe pelo WhatsApp.</p>)}
+                </article>)}</div> : <p className="public-track-empty">{trackMode === 'protocol' ? 'Não encontramos um pedido com esse número. Confira o código do comprovante ou consulte pelo e-mail e celular.' : 'Não encontramos pedidos com esses dados. Confira o e-mail e o telefone ou use o número do pedido.'}</p>)}
         </section>
 
         <section className="public-coverage" id="atendimento">
