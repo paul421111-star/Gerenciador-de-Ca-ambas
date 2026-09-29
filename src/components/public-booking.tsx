@@ -76,8 +76,11 @@ export function PublicBooking({ contact = DEFAULT_PUBLIC_CONTACT }: { contact?: 
     const [serviceType, setServiceType] = useState<keyof typeof SERVICE_LABELS>('RENTAL');
     const [phone, setPhone] = useState('');
     const [postalCode, setPostalCode] = useState('');
-    const [address, setAddress] = useState('');
+    const [street, setStreet] = useState('');
+    const [houseNumber, setHouseNumber] = useState('');
+    const [complement, setComplement] = useState('');
     const [neighborhood, setNeighborhood] = useState('');
+    const address = [`${street.trim()}${houseNumber.trim() ? `, ${houseNumber.trim()}` : ''}`, complement.trim()].filter(Boolean).join(' — ');
     const [city, setCity] = useState('');
     const [busy, setBusy] = useState(false);
     const [cepBusy, setCepBusy] = useState(false);
@@ -139,7 +142,7 @@ export function PublicBooking({ contact = DEFAULT_PUBLIC_CONTACT }: { contact?: 
             const response = await fetch(`/api/public/cep/${cep}`, { cache: 'no-store' });
             if (!response.ok) return;
             const data = await response.json() as { street?: string; neighborhood?: string; city?: string; state?: string };
-            if (data.street) setAddress(data.street);
+            if (data.street) setStreet(data.street);
             if (data.neighborhood) setNeighborhood(data.neighborhood);
             if (data.city) setCity([data.city, data.state].filter(Boolean).join(' / '));
         }
@@ -308,7 +311,11 @@ export function PublicBooking({ contact = DEFAULT_PUBLIC_CONTACT }: { contact?: 
                         <label><span>WhatsApp / telefone *</span><input name="phoneDisplay" required inputMode="tel" autoComplete="tel" value={phone} onChange={event => setPhone(phoneMask(event.target.value))} placeholder="(11) 99999-9999"/></label>
                         <label><span>E-mail *</span><input name="email" type="email" required autoComplete="email" maxLength={254} placeholder="voce@exemplo.com"/><small>Use este e-mail para consultar o andamento.</small></label>
                         <label><span>CEP</span><input name="postalCodeDisplay" inputMode="numeric" autoComplete="postal-code" value={postalCode} onChange={event => setPostalCode(cepMask(event.target.value))} onBlur={event => void lookupCep(event.target.value)} placeholder="00000-000"/><small>{cepBusy ? 'Buscando endereço...' : 'Preenchemos o endereço pelo CEP.'}</small></label>
-                        <label className="wide"><span>Rua, número e complemento *</span><input name="addressDisplay" required minLength={5} maxLength={240} autoComplete="street-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Ex.: Rua das Flores, 120 — portão azul"/></label>
+                        <div className="public-address-row wide">
+                            <label><span>Rua / avenida *</span><input name="streetDisplay" required minLength={3} maxLength={160} autoComplete="address-line1" value={street} onChange={event => setStreet(event.target.value)} placeholder="Ex.: Rua das Flores"/></label>
+                            <label><span>Número *</span><input name="houseNumberDisplay" required maxLength={12} inputMode="numeric" value={houseNumber} onChange={event => setHouseNumber(event.target.value)} placeholder="120"/></label>
+                        </div>
+                        <label className="wide"><span>Complemento</span><input name="complementDisplay" maxLength={60} autoComplete="address-line2" value={complement} onChange={event => setComplement(event.target.value)} placeholder="Opcional — apto, bloco, portão azul, referência"/></label>
                         <label><span>Bairro *</span><input name="neighborhoodDisplay" required minLength={2} maxLength={100} value={neighborhood} onChange={event => setNeighborhood(event.target.value)} placeholder="Bairro"/></label>
                         <label><span>Cidade / UF *</span><input name="cityDisplay" required minLength={2} maxLength={100} value={city} onChange={event => setCity(event.target.value)} placeholder="Taboão da Serra / SP"/></label>
                     </div>
